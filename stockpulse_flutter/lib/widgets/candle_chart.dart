@@ -7,8 +7,14 @@ import '../theme/app_theme.dart';
 class CandleChart extends StatefulWidget {
   final List<CandleData> data;
   final double height;
+  final bool isIntraday;
 
-  const CandleChart({super.key, required this.data, this.height = 350});
+  const CandleChart({
+    super.key, 
+    required this.data, 
+    this.height = 350,
+    this.isIntraday = false,
+  });
 
   @override
   State<CandleChart> createState() => _CandleChartState();
@@ -54,6 +60,7 @@ class _CandleChartState extends State<CandleChart> {
                       candleWidth: candleWidth,
                       spacing: spacing,
                       step: step,
+                      isIntraday: widget.isIntraday,
                     ),
                   ),
                   if (_hoverIndex != null && _hoverIndex! >= 0 && _hoverIndex! < widget.data.length)
@@ -114,6 +121,10 @@ class _CandleChartState extends State<CandleChart> {
       left = (index * step) - 110;
     }
 
+    final dateStr = widget.isIntraday 
+      ? "${candle.date.hour.toString().padLeft(2,'0')}:${candle.date.minute.toString().padLeft(2,'0')}"
+      : "${candle.date.day}/${candle.date.month}";
+
     return Positioned(
       top: 0,
       left: max(0, left),
@@ -127,7 +138,7 @@ class _CandleChartState extends State<CandleChart> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("${candle.date.day}/${candle.date.month} ${candle.date.hour.toString().padLeft(2,'0')}:${candle.date.minute.toString().padLeft(2,'0')}", 
+            Text(dateStr, 
               style: const TextStyle(color: AppTheme.primary, fontSize: 9, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             _tooltipRow("O", candle.open),
@@ -158,6 +169,7 @@ class CandlePainter extends CustomPainter {
   final double candleWidth;
   final double spacing;
   final double step;
+  final bool isIntraday;
 
   CandlePainter({
     required this.data,
@@ -166,6 +178,7 @@ class CandlePainter extends CustomPainter {
     required this.candleWidth,
     required this.spacing,
     required this.step,
+    required this.isIntraday,
   });
 
   @override
@@ -192,10 +205,17 @@ class CandlePainter extends CustomPainter {
 
     // Dynamic Vertical Grid (Time marks)
     int timeInterval = (data.length / 5).ceil();
+    if (timeInterval < 1) timeInterval = 1;
+
     for (int i = 0; i < data.length; i += timeInterval) {
       double x = i * step + (step / 2);
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-      _drawText(canvas, Offset(x - 15, size.height + 5), "${data[i].date.day}/${data[i].date.month}", fontSize: 8);
+      
+      final label = isIntraday 
+        ? "${data[i].date.hour.toString().padLeft(2,'0')}:${data[i].date.minute.toString().padLeft(2,'0')}"
+        : "${data[i].date.day}/${data[i].date.month}";
+        
+      _drawText(canvas, Offset(x - 15, size.height + 5), label, fontSize: 8);
     }
 
     // PRO CROSSHAIR
@@ -271,3 +291,4 @@ class CandlePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CandlePainter oldDelegate) => true;
 }
+

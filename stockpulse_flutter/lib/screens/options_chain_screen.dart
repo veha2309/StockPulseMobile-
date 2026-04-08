@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/market_provider.dart';
-import '../providers/portfolio_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/trade_modal.dart';
 
 class OptionsChainScreen extends StatefulWidget {
   const OptionsChainScreen({super.key});
@@ -13,84 +13,20 @@ class OptionsChainScreen extends StatefulWidget {
 }
 
 class _OptionsChainScreenState extends State<OptionsChainScreen> {
-  final _lotsController = TextEditingController(text: "1");
 
   void _showTradeDialog(OptionContract contract, String type) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: GlassCard(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(contract.contractSymbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("Premium"),
-                  Text("₹${contract.lastPrice}", style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _lotsController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Number of Lots (1 lot = 50 units)"),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => _handleTrade(contract, type, "buy"),
-                      child: const Text("BUY"),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+      backgroundColor: Colors.transparent,
+      builder: (context) => TradeModal(
+        symbol: contract.contractSymbol,
+        price: contract.lastPrice,
+        isBuy: true, // Default to buy in this view
+        isOption: true,
+        contract: contract,
       ),
     );
-  }
-
-  void _handleTrade(OptionContract contract, String type, String action) async {
-    final lots = int.tryParse(_lotsController.text) ?? 0;
-    if (lots <= 0) return;
-
-    final portfolio = context.read<PortfolioProvider>();
-    final market = context.read<MarketProvider>();
-
-    try {
-      await portfolio.tradeOption(
-        contractSymbol: contract.contractSymbol,
-        underlyingSymbol: market.currentSymbol,
-        type: type,
-        strike: contract.strike,
-        expiration: contract.expiration,
-        lots: lots,
-        premium: contract.lastPrice,
-        action: action,
-      );
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Option trade successful!")),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.secondary),
-        );
-      }
-    }
   }
 
   @override

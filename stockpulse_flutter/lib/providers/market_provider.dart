@@ -49,6 +49,7 @@ class MarketProvider extends ChangeNotifier {
   List<OptionContract> calls = [];
   List<OptionContract> puts = [];
   List<CandleData> chartData = [];
+  List<CandleData> intradayChartData = [];
   bool isLoading = false;
   String currentSymbol = "NSE:NIFTY50";
   List<String> watchlist = ["NSE:RELIANCE", "NSE:TCS", "NSE:HDFCBANK", "NSE:INFY"];
@@ -100,36 +101,40 @@ class MarketProvider extends ChangeNotifier {
 
     try {
       final yfSymbol = _toYahooSymbol(symbol);
+      
       // Fetch 1 month of daily data for candlesticks
-      final url = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$yfSymbol?interval=1d&range=1mo');
-      final response = await http.get(url, headers: {"User-Agent": "Mozilla/5.0"});
+      final monthlyUrl = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$yfSymbol?interval=1d&range=1mo');
+      final intradayUrl = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$yfSymbol?interval=5m&range=1d');
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+      final responses = await Future.wait([
+        http.get(monthlyUrl, headers: {"User-Agent": "Mozilla/5.0"}),
+        http.get(intradayUrl, headers: {"User-Agent": "Mozilla/5.0"}),
+      ]);
+
+      if (responses[0].statusCode == 200) {
+        final data = jsonDecode(responses[0].body);
         final result = data['chart']['result'];
         if (result != null && result.isNotEmpty) {
           final quote = result[0]['indicators']['quote'][0];
           final timestamps = result[0]['timestamp'] as List<dynamic>;
-          
           underlyingPrice = (result[0]['meta']['regularMarketPrice'] ?? 0).toDouble();
           
-          chartData.clear();
-          for (int i = 0; i < timestamps.length; i++) {
-            if (quote['open'][i] != null && quote['high'][i] != null && quote['low'][i] != null && quote['close'][i] != null) {
-              chartData.add(CandleData(
-                date: DateTime.fromMillisecondsSinceEpoch(timestamps[i] * 1000),
-                open: (quote['open'][i]).toDouble(),
-                high: (quote['high'][i]).toDouble(),
-                low: (quote['low'][i]).toDouble(),
-                close: (quote['close'][i]).toDouble(),
-              ));
-            }
-          }
-
-          if (underlyingPrice > 0) {
-            _generateOptionsChain(symbol);
-          }
+          chartData = _parseCandles(timestamps, quote);
         }
+      }
+
+      if (responses[1].statusCode == 200) {
+        final data = jsonDecode(responses[1].body);
+        final result = data['chart']['result'];
+        if (result != null && result.isNotEmpty) {
+          final quote = result[0]['indicators']['quote'][0];
+          final timestamps = result[0]['timestamp'] as List<dynamic>;
+          intradayChartData = _parseCandles(timestamps, quote);
+        }
+      }
+
+      if (underlyingPrice > 0) {
+        _generateOptionsChain(symbol);
       }
     } catch (e) {
       debugPrint("Error fetching market data: $e");
@@ -139,6 +144,21 @@ class MarketProvider extends ChangeNotifier {
     }
   }
 
+  List<CandleData> _parseCandles(List<dynamic> timestamps, dynamic quote) {
+    List<CandleData> candles = [];
+    for (int i = 0; i < timestamps.length; i++) {
+      if (quote['open'][i] != null && quote['high'][i] != null && quote['low'][i] != null && quote['close'][i] != null) {
+        candles.add(CandleData(
+          date: DateTime.fromMillisecondsSinceEpoch(timestamps[i] * 1000),
+          open: (quote['open'][i]).toDouble(),
+          high: (quote['high'][i]).toDouble(),
+          low: (quote['low'][i]).toDouble(),
+          close: (quote['close'][i]).toDouble(),
+        ));
+      }
+    }
+    return candles;
+  }
   String _toYahooSymbol(String symbol) {
     if (symbol.startsWith("NSE:")) return "${symbol.substring(4)}.NS";
     if (symbol.startsWith("BSE:")) return "${symbol.substring(4)}.BO";
