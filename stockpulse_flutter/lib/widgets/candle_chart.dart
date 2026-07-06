@@ -4,16 +4,48 @@ import 'package:flutter/services.dart';
 import '../providers/market_provider.dart';
 import '../theme/app_theme.dart';
 
+enum IndicatorType { sma, ema, bollingerBands }
+
+class ChartIndicator {
+  final IndicatorType type;
+  final int period;
+  final Color color;
+  final double multiplier;
+
+  const ChartIndicator({
+    required this.type,
+    this.period = 20,
+    this.color = Colors.cyanAccent,
+    this.multiplier = 2.0,
+  });
+}
+
+class ComputedIndicator {
+  final ChartIndicator config;
+  final List<double?> mainLine;
+  final List<double?> upperLine;
+  final List<double?> lowerLine;
+
+  ComputedIndicator({
+    required this.config,
+    required this.mainLine,
+    this.upperLine = const [],
+    this.lowerLine = const [],
+  });
+}
+
 class CandleChart extends StatefulWidget {
   final List<CandleData> data;
   final double height;
   final bool isIntraday;
+  final List<ChartIndicator> activeIndicators;
 
   const CandleChart({
-    super.key, 
-    required this.data, 
+    super.key,
+    required this.data,
     this.height = 350,
     this.isIntraday = false,
+    this.activeIndicators = const [],
   });
 
   @override
@@ -21,274 +53,494 @@ class CandleChart extends StatefulWidget {
 }
 
 class _CandleChartState extends State<CandleChart> {
+  static const double _yAxisWidth = 58.0;
+  static const double _xAxisHeight = 22.0;
+  static const double _topPad = 12.0;
+
+  // X zoom: number of candles visible
+  double _visibleCandles = 0;
+  // Pan: leftmost visible candle index (fractional)
+  double _panOffset = 0.0;
+  // Y zoom: >1 = tighter price range
+  double _yZoom = 1.0;
+
+  // 1-finger pan tracking
+  double _panStartOffset = 0.0;
+  double _panStartX = 0.0;
+
+  // Axis-drag zoom tracking
+  double _axisDragStartX = 0.0;
+  double _axisDragStartY = 0.0;
+  double _axisDragStartVisible = 0.0;
+  double _axisDragStartYZoom = 1.0;
+
+  // Crosshair
   int? _hoverIndex;
-  Offset? _touchPosition;
+  double? _hoverPrice;
+  bool _crosshairActive = false;
+
+  List<ComputedIndicator> _computeIndicators() {
+    final results = <ComputedIndicator>[];
+    for (var ind in widget.activeIndicators) {
+      if (widget.data.length < ind.period) continue;
+      final mainVals = List<double?>.filled(widget.data.length, null);
+
+      if (ind.type == IndicatorType.sma) {
+        for (int i = ind.period - 1; i < widget.data.length; i++) {
+          double sum = 0;
+          for (int j = 0; j < ind.period; j++) sum += widget.data[i - j].close;
+          mainVals[i] = sum / ind.period;
+        }
+        results.add(ComputedIndicator(config: ind, mainLine: mainVals));
+      } else if (ind.type == IndicatorType.ema) {
+        final k = 2 / (ind.period + 1);
+        double sum = 0;
+        for (int j = 0; j < ind.period; j++) sum += widget.data[ind.period - 1 - j].close;
+        mainVals[ind.period - 1] = sum / ind.period;
+        for (int i = ind.period; i < widget.data.length; i++) {
+          mainVals[i] = (widget.data[i].close - mainVals[i - 1]!) * k + mainVals[i - 1]!;
+        }
+        results.add(ComputedIndicator(config: ind, mainLine: mainVals));
+      } else if (ind.type == IndicatorType.bollingerBands) {
+        final upper = List<double?>.filled(widget.data.length, null);
+        final lower = List<double?>.filled(widget.data.length, null);
+        for (int i = ind.period - 1; i < widget.data.length; i++) {
+          double sum = 0;
+          for (int j = 0; j < ind.period; j++) sum += widget.data[i - j].close;
+          final sma = sum / ind.period;
+          mainVals[i] = sma;
+          double vSum = 0;
+          for (int j = 0; j < ind.period; j++) vSum += pow(widget.data[i - j].close - sma, 2);
+          final sd = sqrt(vSum / ind.period);
+          upper[i] = sma + sd * ind.multiplier;
+          lower[i] = sma - sd * ind.multiplier;
+        }
+        results.add(ComputedIndicator(config: ind, mainLine: mainVals, upperLine: upper, lowerLine: lower));
+      }
+    }
+    return results;
+  }
+
+  ({double hi, double lo}) _baseRange(List<ComputedIndicator> computed) {
+    double hi = widget.data.map((e) => e.high).reduce(max);
+    double lo = widget.data.map((e) => e.low).reduce(min);
+    for (var ind in computed) {
+      for (var v in ind.mainLine) { if (v != null) { hi = max(hi, v); lo = min(lo, v); } }
+      for (var v in ind.upperLine) { if (v != null) hi = max(hi, v); }
+      for (var v in ind.lowerLine) { if (v != null) lo = min(lo, v); }
+    }
+    final pad = (hi - lo) * 0.12;
+    return (hi: hi + pad, lo: lo - pad);
+  }
+
+  double _clampPan(double pan, double visibleCandles) =>
+      pan.clamp(0.0, max(0.0, widget.data.length - visibleCandles));
+
+  // ── 1-finger pan on plot area ──────────────────────────
+  void _onPanStart(DragStartDetails d) {
+    _panStartOffset = _panOffset;
+    _panStartX = d.localPosition.dx;
+  }
+
+  void _onPanUpdate(DragUpdateDetails d, double plotW) {
+    if (_crosshairActive) return;
+    final step = plotW / _visibleCandles;
+    final dx = _panStartX - d.localPosition.dx;
+    setState(() => _panOffset = _clampPan(_panStartOffset + dx / step, _visibleCandles));
+  }
+
+  // ── X-axis drag: left = zoom in (fewer candles), right = zoom out ──
+  void _onXAxisDragStart(DragStartDetails d) {
+    _axisDragStartX = d.localPosition.dx;
+    _axisDragStartVisible = _visibleCandles;
+  }
+
+  void _onXAxisDragUpdate(DragUpdateDetails d) {
+    final dx = d.localPosition.dx - _axisDragStartX;
+    // Each 4px = 1 candle change; drag right = more candles (zoom out)
+    final delta = dx / 4;
+    setState(() {
+      _visibleCandles = (_axisDragStartVisible + delta)
+          .clamp(5.0, widget.data.length.toDouble());
+      _panOffset = _clampPan(_panOffset, _visibleCandles);
+    });
+  }
+
+  // ── Y-axis drag: drag up = zoom in (tighter range), drag down = zoom out ──
+  void _onYAxisDragStart(DragStartDetails d) {
+    _axisDragStartY = d.localPosition.dy;
+    _axisDragStartYZoom = _yZoom;
+  }
+
+  void _onYAxisDragUpdate(DragUpdateDetails d) {
+    final dy = _axisDragStartY - d.localPosition.dy;
+    setState(() {
+      _yZoom = (_axisDragStartYZoom + dy / 60).clamp(0.5, 8.0);
+    });
+  }
+
+  void _activateCrosshair(Offset local, double plotW, double plotH,
+      double minP, double maxP, double step) {
+    final idx = (_panOffset + local.dx / step).floor().clamp(0, widget.data.length - 1);
+    final c = widget.data[idx];
+
+    final prices = [c.open, c.high, c.low, c.close];
+    double snapped = prices[0];
+    double minDist = double.infinity;
+    for (final p in prices) {
+      final py = _topPad + plotH - ((p - minP) / (maxP - minP) * plotH);
+      final dist = (local.dy - py).abs();
+      if (dist < minDist) { minDist = dist; snapped = p; }
+    }
+
+    if (idx != _hoverIndex) HapticFeedback.selectionClick();
+    setState(() {
+      _crosshairActive = true;
+      _hoverIndex = idx;
+      _hoverPrice = snapped;
+    });
+  }
+
+  void _clearCrosshair() => setState(() {
+    _crosshairActive = false;
+    _hoverIndex = null;
+    _hoverPrice = null;
+  });
 
   @override
   Widget build(BuildContext context) {
     if (widget.data.isEmpty) {
-      return const Center(child: Text("No data available", style: TextStyle(color: AppTheme.onSurfaceVariant)));
+      return SizedBox(
+        height: widget.height,
+        child: Center(child: Text('No data', style: TextStyle(color: AppTheme.onSurfaceVariant))),
+      );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double chartWidth = constraints.maxWidth - 52; // Account for price labels
-        final int visibleCount = widget.data.length;
-        final double candleWidth = (chartWidth / visibleCount) * 0.6;
-        final double spacing = (chartWidth / visibleCount) * 0.4;
-        final double step = chartWidth / visibleCount;
+    final isDark = AppTheme.isDark;
+    final gridColor = isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.06);
+    final labelColor = isDark ? Colors.white.withValues(alpha: 0.5) : Colors.black.withValues(alpha: 0.45);
+    final tooltipBg = isDark ? const Color(0xFF1A1A2E) : Colors.white;
+    final tooltipBorder = isDark ? AppTheme.borderColor : Colors.black.withValues(alpha: 0.12);
 
-        return SizedBox(
-          height: widget.height,
-          child: Padding(
-            padding: const EdgeInsets.only(right: 52, top: 10, bottom: 20),
-            child: GestureDetector(
-              onPanStart: (details) => _updateHover(details.localPosition, step, visibleCount),
-              onPanUpdate: (details) => _updateHover(details.localPosition, step, visibleCount),
-              onPanEnd: (_) => setState(() { _hoverIndex = null; _touchPosition = null; }),
-              onTapDown: (details) => _updateHover(details.localPosition, step, visibleCount),
-              onTapUp: (_) => setState(() { _hoverIndex = null; _touchPosition = null; }),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  CustomPaint(
-                    size: Size(chartWidth, widget.height),
-                    painter: CandlePainter(
-                      data: widget.data, 
-                      hoverIndex: _hoverIndex,
-                      touchPosition: _touchPosition,
-                      candleWidth: candleWidth,
-                      spacing: spacing,
-                      step: step,
-                      isIntraday: widget.isIntraday,
-                    ),
-                  ),
-                  if (_hoverIndex != null && _hoverIndex! >= 0 && _hoverIndex! < widget.data.length)
-                    _buildTooltip(widget.data[_hoverIndex!], _hoverIndex!, step, chartWidth),
-                ],
+    return LayoutBuilder(builder: (context, constraints) {
+      final canvasW = constraints.maxWidth;
+      final canvasH = (constraints.maxHeight.isFinite && constraints.maxHeight > 0)
+          ? constraints.maxHeight
+          : widget.height;
+      final plotW = canvasW - _yAxisWidth;
+      final plotH = canvasH - _xAxisHeight - _topPad;
+
+      if (_visibleCandles == 0) {
+        _visibleCandles = widget.data.length.toDouble();
+        _panOffset = max(0.0, widget.data.length - _visibleCandles);
+      }
+
+      final step = plotW / _visibleCandles;
+      final computed = _computeIndicators();
+      final base = _baseRange(computed);
+
+      final mid = (base.hi + base.lo) / 2;
+      final halfRange = (base.hi - base.lo) / 2 / _yZoom;
+      final minP = mid - halfRange;
+      final maxP = mid + halfRange;
+
+      return SizedBox(
+        width: canvasW,
+        height: canvasH,
+        child: Stack(
+          children: [
+            // ── Full chart painter ───────────────────────────
+            CustomPaint(
+              size: Size(canvasW, canvasH),
+              painter: _ChartPainter(
+                data: widget.data,
+                computed: computed,
+                isIntraday: widget.isIntraday,
+                plotW: plotW,
+                plotH: plotH,
+                topPad: _topPad,
+                yAxisWidth: _yAxisWidth,
+                xAxisHeight: _xAxisHeight,
+                minPrice: minP,
+                maxPrice: maxP,
+                panOffset: _panOffset,
+                visibleCandles: _visibleCandles,
+                hoverIndex: _hoverIndex,
+                hoverPrice: _hoverPrice,
+                gridColor: gridColor,
+                labelColor: labelColor,
+              ),
+              child: (_crosshairActive && _hoverIndex != null && _hoverPrice != null)
+                  ? _buildTooltip(plotW, plotH, minP, maxP, step, tooltipBg, tooltipBorder)
+                  : null,
+            ),
+            // ── Plot area: pan + long-press crosshair ────────
+            Positioned(
+              left: 0, top: 0,
+              width: plotW, height: plotH + _topPad,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: _onPanStart,
+                onHorizontalDragUpdate: (d) => _onPanUpdate(d, plotW),
+                onLongPressStart: (d) => _activateCrosshair(d.localPosition, plotW, plotH, minP, maxP, step),
+                onLongPressMoveUpdate: (d) => _activateCrosshair(d.localPosition, plotW, plotH, minP, maxP, step),
+                onLongPressEnd: (_) => _clearCrosshair(),
+                onLongPressCancel: _clearCrosshair,
               ),
             ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _updateHover(Offset localPos, double step, int count) {
-    int idx = (localPos.dx / step).floor();
-    if (idx < 0) idx = 0;
-    if (idx >= count) idx = count - 1;
-
-    final candle = widget.data[idx];
-    
-    // Find nearest vertical price point (O, H, L, C)
-    final prices = [candle.open, candle.high, candle.low, candle.close];
-    double maxHigh = widget.data.map((e) => e.high).reduce(max);
-    double minLow = widget.data.map((e) => e.low).reduce(min);
-    final range = maxHigh - minLow;
-    final chartMax = maxHigh + range * 0.15;
-    final chartMin = minLow - range * 0.15;
-    final finalRange = chartMax - chartMin;
-
-    double nearestPrice = prices[0];
-    double minDelta = 1e9;
-    
-    for (var p in prices) {
-      double py = widget.height - 30 - ((p - chartMin) / finalRange * (widget.height - 30)); // Adjusted for padding
-      double delta = (localPos.dy - py).abs();
-      if (delta < minDelta) {
-        minDelta = delta;
-        nearestPrice = p;
-      }
-    }
-
-    if (_hoverIndex != idx) {
-      HapticFeedback.selectionClick();
-    }
-
-    setState(() {
-      _hoverIndex = idx;
-      // Snap Y to the nearest price point's vertical coordinate
-      double snappedY = widget.height - 30 - ((nearestPrice - chartMin) / finalRange * (widget.height - 30));
-      _touchPosition = Offset(localPos.dx, snappedY);
+            // ── X-axis strip: horizontal drag to zoom X ──────
+            Positioned(
+              left: 0, top: plotH + _topPad,
+              width: plotW, height: _xAxisHeight,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: _onXAxisDragStart,
+                onHorizontalDragUpdate: _onXAxisDragUpdate,
+              ),
+            ),
+            // ── Y-axis strip: vertical drag to zoom Y ────────
+            Positioned(
+              left: plotW, top: 0,
+              width: _yAxisWidth, height: plotH + _topPad,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragStart: _onYAxisDragStart,
+                onVerticalDragUpdate: _onYAxisDragUpdate,
+              ),
+            ),
+          ],
+        ),
+      );
     });
   }
 
-  Widget _buildTooltip(CandleData candle, int index, double step, double chartWidth) {
-    // Determine tooltip side to prevent overflow
-    double left = (index * step) + 10;
-    if (left + 100 > chartWidth) {
-      left = (index * step) - 110;
-    }
+  Widget _buildTooltip(double plotW, double plotH, double minP, double maxP,
+      double step, Color bg, Color border) {
+    final idx = _hoverIndex!;
+    final candle = widget.data[idx];
+    const tooltipW = 92.0;
+    const tooltipH = 82.0;
 
-    final dateStr = widget.isIntraday 
-      ? "${candle.date.hour.toString().padLeft(2,'0')}:${candle.date.minute.toString().padLeft(2,'0')}"
-      : "${candle.date.day}/${candle.date.month}";
+    final cx = (idx - _panOffset) * step + step / 2;
+    double left = cx + 12;
+    if (left + tooltipW > plotW) left = cx - tooltipW - 12;
+    left = left.clamp(0.0, plotW - tooltipW);
 
-    return Positioned(
-      top: 0,
-      left: max(0, left),
-      child: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.9),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(dateStr, 
-              style: const TextStyle(color: AppTheme.primary, fontSize: 9, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            _tooltipRow("O", candle.open),
-            _tooltipRow("H", candle.high),
-            _tooltipRow("L", candle.low),
-            _tooltipRow("C", candle.close),
-          ],
+    final snappedY = _topPad + plotH - ((_hoverPrice! - minP) / (maxP - minP) * plotH);
+    double top = snappedY - tooltipH / 2;
+    top = top.clamp(_topPad, _topPad + plotH - tooltipH);
+
+    final dateStr = widget.isIntraday
+        ? '${candle.date.hour.toString().padLeft(2, '0')}:${candle.date.minute.toString().padLeft(2, '0')}'
+        : '${candle.date.day}/${candle.date.month}/${candle.date.year.toString().substring(2)}';
+
+    return Stack(children: [
+      Positioned(
+        left: left, top: top,
+        child: Container(
+          width: tooltipW,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: border),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 8)],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(dateStr, style: TextStyle(color: AppTheme.primary, fontSize: 9, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              _tRow('O', candle.open),
+              _tRow('H', candle.high),
+              _tRow('L', candle.low),
+              _tRow('C', candle.close),
+            ],
+          ),
         ),
       ),
-    );
+    ]);
   }
 
-  Widget _tooltipRow(String label, double val) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text("$label: ", style: const TextStyle(color: AppTheme.onSurfaceVariant, fontSize: 9)),
-        Text("₹${val.toStringAsFixed(2)}", style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
+  Widget _tRow(String l, double v) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Text('$l ', style: TextStyle(color: AppTheme.onSurfaceVariant, fontSize: 9)),
+      Text('₹${v.toStringAsFixed(1)}', style: TextStyle(color: AppTheme.onSurface, fontSize: 9, fontWeight: FontWeight.bold)),
+    ],
+  );
 }
 
-class CandlePainter extends CustomPainter {
-  final List<CandleData> data;
-  final int? hoverIndex;
-  final Offset? touchPosition;
-  final double candleWidth;
-  final double spacing;
-  final double step;
-  final bool isIntraday;
+// ─────────────────────────────────────────────────────────────────────────────
 
-  CandlePainter({
+class _ChartPainter extends CustomPainter {
+  final List<CandleData> data;
+  final List<ComputedIndicator> computed;
+  final bool isIntraday;
+  final double plotW, plotH, topPad, yAxisWidth, xAxisHeight;
+  final double minPrice, maxPrice;
+  final double panOffset, visibleCandles;
+  final int? hoverIndex;
+  final double? hoverPrice;
+  final Color gridColor, labelColor;
+
+  _ChartPainter({
     required this.data,
-    this.hoverIndex,
-    this.touchPosition,
-    required this.candleWidth,
-    required this.spacing,
-    required this.step,
+    required this.computed,
     required this.isIntraday,
+    required this.plotW, required this.plotH,
+    required this.topPad, required this.yAxisWidth, required this.xAxisHeight,
+    required this.minPrice, required this.maxPrice,
+    required this.panOffset, required this.visibleCandles,
+    required this.hoverIndex, required this.hoverPrice,
+    required this.gridColor, required this.labelColor,
   });
+
+  double get _range => maxPrice - minPrice;
+  double get _step => plotW / visibleCandles;
+
+  double _px(int i) => (i - panOffset) * _step + _step / 2;
+  double _py(double price) => topPad + plotH - ((price - minPrice) / _range * plotH);
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (data.isEmpty) return;
+    if (_range == 0 || data.isEmpty) return;
 
-    double maxHigh = data.map((e) => e.high).reduce(max);
-    double minLow = data.map((e) => e.low).reduce(min);
-    
-    final range = maxHigh - minLow;
-    maxHigh += range * 0.15;
-    minLow -= range * 0.15;
-    final finalRange = maxHigh - minLow;
+    final gridPaint = Paint()..color = gridColor..strokeWidth = 0.5;
+    final labelStyle = TextStyle(color: labelColor, fontSize: 9);
 
-    final gridPaint = Paint()..color = Colors.white.withValues(alpha: 0.05)..strokeWidth = 0.5;
-
-    // Price Grid
-    for (int i = 0; i <= 6; i++) {
-      double y = size.height * i / 6;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-      double price = maxHigh - (finalRange * i / 6);
-      _drawText(canvas, Offset(size.width + 8, y - 7), "₹${price.toStringAsFixed(0)}", fontSize: 9);
+    // ── Horizontal grid + Y labels ────────────────────────
+    const gridLines = 6;
+    for (int i = 0; i <= gridLines; i++) {
+      final y = topPad + plotH * i / gridLines;
+      canvas.drawLine(Offset(0, y), Offset(plotW, y), gridPaint);
+      final price = maxPrice - (_range * i / gridLines);
+      _drawText(canvas, '₹${price.toStringAsFixed(0)}', Offset(plotW + 4, y - 6), labelStyle);
     }
 
-    // Dynamic Vertical Grid (Time marks)
-    int timeInterval = (data.length / 5).ceil();
-    if (timeInterval < 1) timeInterval = 1;
+    // ── Vertical grid + X labels ──────────────────────────
+    final firstVisible = panOffset.floor();
+    final lastVisible = min(data.length - 1, (panOffset + visibleCandles).ceil());
+    final labelInterval = max(1, ((lastVisible - firstVisible) / 5).ceil());
 
-    for (int i = 0; i < data.length; i += timeInterval) {
-      double x = i * step + (step / 2);
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-      
-      final label = isIntraday 
-        ? "${data[i].date.hour.toString().padLeft(2,'0')}:${data[i].date.minute.toString().padLeft(2,'0')}"
-        : "${data[i].date.day}/${data[i].date.month}";
-        
-      _drawText(canvas, Offset(x - 15, size.height + 5), label, fontSize: 8);
+    for (int i = firstVisible; i <= lastVisible; i += labelInterval) {
+      final x = _px(i);
+      if (x < 0 || x > plotW) continue;
+      canvas.drawLine(Offset(x, topPad), Offset(x, topPad + plotH), gridPaint);
+      final label = isIntraday
+          ? '${data[i].date.hour.toString().padLeft(2, '0')}:${data[i].date.minute.toString().padLeft(2, '0')}'
+          : '${data[i].date.day}/${data[i].date.month}';
+      _drawText(canvas, label, Offset(x - 12, topPad + plotH + 5), labelStyle);
     }
 
-    // PRO CROSSHAIR
-    if (hoverIndex != null && touchPosition != null) {
-      double cx = hoverIndex! * step + (step / 2);
-      double cy = touchPosition!.dy.clamp(0, size.height);
-      final crossPaint = Paint()..color = AppTheme.primary.withValues(alpha: 0.4)..strokeWidth = 1.0;
-      
-      // Vertical
-      canvas.drawLine(Offset(cx, 0), Offset(cx, size.height), crossPaint);
-      // Horizontal
-      canvas.drawLine(Offset(0, cy), Offset(size.width, cy), crossPaint);
+    // ── Clip plot area ────────────────────────────────────
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, topPad, plotW, plotH));
 
-      // Price Indicator (Right Axis)
-      double priceAtTouch = maxHigh - (cy / size.height * finalRange);
-      _drawPriceBadge(canvas, Offset(size.width + 1, cy - 8), "₹${priceAtTouch.toStringAsFixed(2)}");
-    }
+    // ── Candles ───────────────────────────────────────────
+    final candleW = _step * 0.6;
+    for (int i = firstVisible; i <= lastVisible; i++) {
+      final cx = _px(i);
+      if (cx + candleW < 0 || cx - candleW > plotW) continue;
 
-    // Draw Candles
-    for (int i = 0; i < data.length; i++) {
-      final candle = data[i];
-      final isBullish = candle.close >= candle.open;
-      final Color candleColor = isBullish ? AppTheme.primary : AppTheme.secondary;
-      final p = Paint()..color = candleColor..style = PaintingStyle.fill;
-      final wickPaint = Paint()..color = candleColor.withValues(alpha: 0.6)..strokeWidth = 1.0;
+      final c = data[i];
+      final isBull = c.close >= c.open;
+      final color = isBull ? AppTheme.primary : AppTheme.secondary;
 
-      double x = i * step + (spacing / 2);
-      
-      double highY = _priceToY(candle.high, size.height, maxHigh, minLow, finalRange);
-      double lowY = _priceToY(candle.low, size.height, maxHigh, minLow, finalRange);
-      double openY = _priceToY(candle.open, size.height, maxHigh, minLow, finalRange);
-      double closeY = _priceToY(candle.close, size.height, maxHigh, minLow, finalRange);
+      canvas.drawLine(
+        Offset(cx, _py(c.high)),
+        Offset(cx, _py(c.low)),
+        Paint()..color = color.withValues(alpha: 0.7)..strokeWidth = 1.2,
+      );
 
-      canvas.drawLine(Offset(x + candleWidth / 2, highY), Offset(x + candleWidth / 2, lowY), wickPaint);
-
-      double bodyTop = min(openY, closeY);
-      double bodyBottom = max(openY, closeY);
-      if ((bodyBottom - bodyTop).abs() < 1.0) bodyBottom = bodyTop + 1.0; 
-      
+      final bodyTop = min(_py(c.open), _py(c.close));
+      final bodyBot = max(_py(c.open), _py(c.close));
       canvas.drawRRect(
-        RRect.fromRectAndRadius(Rect.fromLTRB(x, bodyTop, x + candleWidth, bodyBottom), const Radius.circular(1)),
-        p,
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(cx - candleW / 2, bodyTop, cx + candleW / 2, max(bodyBot, bodyTop + 1.5)),
+          const Radius.circular(1.5),
+        ),
+        Paint()..color = color..style = PaintingStyle.fill,
       );
     }
+
+    // ── Indicators ────────────────────────────────────────
+    for (var ind in computed) {
+      if (ind.config.type == IndicatorType.bollingerBands) {
+        _drawLine(canvas, ind.upperLine, ind.config.color.withValues(alpha: 0.35), 1.2);
+        _drawLine(canvas, ind.lowerLine, ind.config.color.withValues(alpha: 0.35), 1.2);
+      }
+      _drawLine(canvas, ind.mainLine, ind.config.color, 1.8);
+    }
+
+    canvas.restore();
+
+    // ── Crosshair ─────────────────────────────────────────
+    if (hoverIndex != null && hoverPrice != null) {
+      final cx = _px(hoverIndex!);
+      final cy = _py(hoverPrice!).clamp(topPad, topPad + plotH);
+      final crossPaint = Paint()
+        ..color = AppTheme.primary.withValues(alpha: 0.55)
+        ..strokeWidth = 0.8;
+
+      if (cx >= 0 && cx <= plotW) {
+        canvas.drawLine(Offset(cx, topPad), Offset(cx, topPad + plotH), crossPaint);
+      }
+      canvas.drawLine(Offset(0, cy), Offset(plotW, cy), crossPaint);
+
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '₹${hoverPrice!.toStringAsFixed(2)}',
+          style: const TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.bold),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final badgeRect = Rect.fromLTWH(plotW + 2, cy - 9, tp.width + 10, 18);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(badgeRect, const Radius.circular(4)),
+        Paint()..color = AppTheme.primary,
+      );
+      tp.paint(canvas, Offset(badgeRect.left + 5, badgeRect.top + (18 - tp.height) / 2));
+    }
   }
 
-  double _priceToY(double price, double height, double maxHigh, double minLow, double range) {
-    if (range == 0) return height / 2;
-    return height - ((price - minLow) / range * height);
+  void _drawLine(Canvas canvas, List<double?> values, Color color, double width) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..isAntiAlias = true;
+
+    final path = Path();
+    bool started = false;
+    for (int i = 0; i < values.length; i++) {
+      if (values[i] == null) { started = false; continue; }
+      final x = _px(i);
+      final y = _py(values[i]!);
+      if (!started) { path.moveTo(x, y); started = true; }
+      else path.lineTo(x, y);
+    }
+    canvas.drawPath(path, paint);
   }
 
-  void _drawText(Canvas canvas, Offset offset, String text, {double fontSize = 10}) {
-    final textPainter = TextPainter(
-      text: TextSpan(text: text, style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: fontSize)),
+  void _drawText(Canvas canvas, String text, Offset offset, TextStyle style) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
       textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-    textPainter.paint(canvas, offset);
-  }
-
-  void _drawPriceBadge(Canvas canvas, Offset offset, String text) {
-     final textPainter = TextPainter(
-      text: TextSpan(text: text, style: const TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.bold)),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-
-    final bgRect = Rect.fromLTWH(offset.dx, offset.dy, textPainter.width + 10, textPainter.height + 4);
-    canvas.drawRRect(RRect.fromRectAndRadius(bgRect, const Radius.circular(4)), Paint()..color = AppTheme.primary);
-    textPainter.paint(canvas, Offset(offset.dx + 5, offset.dy + 2));
+    )..layout();
+    tp.paint(canvas, offset);
   }
 
   @override
-  bool shouldRepaint(covariant CandlePainter oldDelegate) => true;
+  bool shouldRepaint(covariant _ChartPainter old) =>
+      old.hoverIndex != hoverIndex ||
+      old.hoverPrice != hoverPrice ||
+      old.panOffset != panOffset ||
+      old.visibleCandles != visibleCandles ||
+      old.minPrice != minPrice ||
+      old.maxPrice != maxPrice ||
+      old.plotH != plotH ||
+      old.data != data;
 }
-

@@ -41,54 +41,62 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTheme.onSurface),
+          icon: Icon(Icons.arrow_back, color: AppTheme.onSurface),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: Container(
-        decoration: const BoxDecoration(color: AppTheme.background),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                const Icon(Icons.person_add_rounded, size: 64, color: AppTheme.primary),
-                const SizedBox(height: 16),
-                Text("Join StockPulse", style: Theme.of(context).textTheme.displayLarge),
-                Text("Create your trading account", style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 48),
-                GlassCard(
-                  child: Column(
-                    children: [
-                      _buildField(_nameController, "Full Name", Icons.person),
-                      const SizedBox(height: 16),
-                      _buildField(_branchController, "Branch", Icons.school),
-                      const SizedBox(height: 16),
-                      _buildField(_enrollmentController, "Enrollment Number", Icons.numbers),
-                      const SizedBox(height: 16),
-                      _buildField(_emailController, "Email Address", Icons.email),
-                      const SizedBox(height: 16),
-                      _buildField(_passwordController, "Password", Icons.lock, obscure: true),
-                      const SizedBox(height: 32),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: context.watch<AuthProvider>().isLoading ? null : _submit,
-                          child: context.watch<AuthProvider>().isLoading
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Text("REGISTER"),
-                        ),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const Icon(Icons.person_add_rounded, size: 64, color: AppTheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                "Join StockPulse", 
+                style: Theme.of(context).textTheme.displayLarge?.copyWith(color: AppTheme.onSurface)
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "Create your trading account", 
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant)
+              ),
+              const SizedBox(height: 48),
+              GlassCard(
+                child: Column(
+                  children: [
+                    _buildField(_nameController, "Full Name", Icons.person),
+                    const SizedBox(height: 16),
+                    _buildField(_branchController, "Branch", Icons.school),
+                    const SizedBox(height: 16),
+                    _buildField(_enrollmentController, "Enrollment Number", Icons.numbers),
+                    const SizedBox(height: 16),
+                    _buildField(_emailController, "Email Address", Icons.email),
+                    const SizedBox(height: 16),
+                    _buildField(_passwordController, "Password", Icons.lock, obscure: true),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed: context.watch<AuthProvider>().isLoading ? null : _submit,
+                        child: context.watch<AuthProvider>().isLoading
+                            ? const CircularProgressIndicator(color: Colors.black)
+                            : const Text(
+                                "REGISTER",
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -99,20 +107,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return TextField(
       controller: controller,
       obscureText: obscure,
-      style: const TextStyle(color: AppTheme.onSurface),
+      style: TextStyle(color: AppTheme.onSurface),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: AppTheme.onSurfaceVariant),
+        labelStyle: TextStyle(color: AppTheme.onSurfaceVariant),
         prefixIcon: Icon(icon, color: AppTheme.primary, size: 20),
         filled: true,
-        fillColor: Colors.black.withValues(alpha: 0.2),
+        fillColor: AppTheme.isDark ? Colors.black.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.03),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppTheme.onSurfaceVariant.withValues(alpha: 0.1)),
+          borderSide: BorderSide(color: AppTheme.borderColor),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),

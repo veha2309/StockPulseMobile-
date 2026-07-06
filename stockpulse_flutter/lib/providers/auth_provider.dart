@@ -16,24 +16,26 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _user != null;
 
   AuthProvider() {
-    print("STP: AuthProvider constructor called.");
     _init();
   }
 
   Future<void> _init() async {
-    print("STP: AuthProvider._init() started...");
+    final startTime = DateTime.now();
     try {
       final box = Hive.box('settings');
       final cachedEmail = box.get('session_email');
-      print("STP: Cached email from Hive: $cachedEmail");
       
       if (cachedEmail != null && cachedEmail.toString().isNotEmpty) {
         await refreshUser(cachedEmail.toString());
-        print("STP: Session restored for ${_user?.email}");
       }
     } catch (e) {
-      print("STP ERROR: AuthProvider initialization failed: $e");
+      debugPrint("STP ERROR: AuthProvider initialization failed: $e");
     } finally {
+      // Ensure splash stays for 5 seconds to allow full animations to play
+      final elapsed = DateTime.now().difference(startTime);
+      if (elapsed.inMilliseconds < 5000) {
+        await Future.delayed(Duration(milliseconds: 5000 - elapsed.inMilliseconds));
+      }
       _isInitializing = false;
       notifyListeners();
     }
@@ -49,10 +51,8 @@ class AuthProvider extends ChangeNotifier {
           .select('email, name, password, branch, enrollment, etokens, e_tokens, portfolio, options')
           .eq('email', email.trim())
           .maybeSingle();
-
-      if (res == null) {
-        throw 'User not found';
-      }
+      
+      if (res == null) throw 'User not found';
 
       final hashedPassword = res['password'] as String;
       if (BCrypt.checkpw(password, hashedPassword)) {
@@ -90,9 +90,7 @@ class AuthProvider extends ChangeNotifier {
           .eq('email', emailTrimmed)
           .maybeSingle();
 
-      if (existing != null) {
-        throw 'Email already registered';
-      }
+      if (existing != null) throw 'Email already registered';
 
       final hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
       
@@ -138,7 +136,6 @@ class AuthProvider extends ChangeNotifier {
       _user = UserData.fromJson(res);
       notifyListeners();
     } catch (e) {
-      print("STP ERROR: refreshUser failed for $email: $e");
       logout();
     }
   }

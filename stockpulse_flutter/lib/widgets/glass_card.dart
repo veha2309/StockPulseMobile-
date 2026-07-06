@@ -1,49 +1,170 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
-class GlassCard extends StatelessWidget {
+class GlassCard extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
-  final double blur;
-  final double opacity;
+  final double blur; // Kept for backwards compatibility
+  final double opacity; // Kept for backwards compatibility
   final BorderRadius? borderRadius;
+  final bool animate;
+  final bool glow;
+  final VoidCallback? onTap;
 
   const GlassCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(20),
-    this.blur = 15.0, // Increased blur for premium feel
-    this.opacity = 0.15, // Lower opacity for better glass effect
+    this.blur = 16.0,
+    this.opacity = 1.0,
     this.borderRadius,
+    this.animate = false,
+    this.glow = false,
+    this.onTap,
   });
 
   @override
+  State<GlassCard> createState() => _GlassCardState();
+}
+
+class _GlassCardState extends State<GlassCard> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final effectiveBorderRadius = borderRadius ?? BorderRadius.circular(24);
-    
-    return ClipRRect(
-      borderRadius: effectiveBorderRadius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: opacity),
-            borderRadius: effectiveBorderRadius,
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.1),
-              width: 1.5,
-            ),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withValues(alpha: 0.1),
-                Colors.white.withValues(alpha: 0.05),
-              ],
-            ),
+    final br = widget.borderRadius ?? BorderRadius.circular(20);
+
+    Widget card = Container(
+      padding: widget.padding,
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: br,
+        border: Border.all(
+          color: widget.glow
+              ? AppTheme.primary.withValues(alpha: 0.4)
+              : AppTheme.borderColor,
+          width: 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.isDark
+                ? Colors.black.withValues(alpha: 0.3)
+                : Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
-          child: child,
+          if (widget.glow)
+            BoxShadow(
+              color: AppTheme.primary.withValues(alpha: AppTheme.isDark ? 0.06 : 0.02),
+              blurRadius: 20,
+              spreadRadius: 2,
+            ),
+        ],
+      ),
+      child: widget.child,
+    );
+
+    if (widget.onTap != null) {
+      card = GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _pressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: card,
+        ),
+      );
+    }
+
+    return card;
+  }
+}
+
+// ── Animated stat card with slide-up entrance ──
+class AnimatedStatCard extends StatefulWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color? valueColor;
+  final int delay; // ms
+
+  const AnimatedStatCard({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.valueColor,
+    this.delay = 0,
+  });
+
+  @override
+  State<AnimatedStatCard> createState() => _AnimatedStatCardState();
+}
+
+class _AnimatedStatCardState extends State<AnimatedStatCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    Future.delayed(Duration(milliseconds: widget.delay), () {
+      if (mounted) _ctrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(
+        position: _slide,
+        child: GlassCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(widget.icon, color: AppTheme.primary, size: 20),
+              const SizedBox(height: 10),
+              Text(
+                widget.value,
+                style: TextStyle(
+                  color: widget.valueColor ?? AppTheme.onSurface,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: AppTheme.onSurfaceVariant,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -7,44 +7,47 @@ import 'theme/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/market_provider.dart';
 import 'providers/portfolio_provider.dart';
+import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() async {
-  print("STP: Main initialization started...");
+  debugPrint("STP: Main initialization started...");
   WidgetsFlutterBinding.ensureInitialized();
 
   // Load environment variables
   try {
     await dotenv.load(fileName: ".env");
-    print("STP: .env loaded.");
+    debugPrint("STP: .env loaded.");
   } catch (e) {
-    print("STP ERROR: Could not load .env file: $e");
+    debugPrint("STP ERROR: Could not load .env file: $e");
   }
 
   // Initialize Hive
   await Hive.initFlutter();
   await Hive.openBox('settings');
-  print("STP: Hive initialized.");
+  debugPrint("STP: Hive initialized.");
 
   // Initialize Supabase with variables from .env
   try {
-    print("STP: Initializing Supabase...");
+    debugPrint("STP: Initializing Supabase...");
     await Supabase.initialize(
       url: dotenv.get('SUPABASE_URL', fallback: ''),
       anonKey: dotenv.get('SUPABASE_SERVICE_ROLE_KEY', fallback: dotenv.get('SUPABASE_ANON_KEY', fallback: '')),
     ).timeout(const Duration(seconds: 10), onTimeout: () {
-      print("STP: Supabase initialization timed out!");
+      debugPrint("STP: Supabase initialization timed out!");
       throw 'Initialization Timeout';
     });
-    print("STP: Supabase initialized.");
+    debugPrint("STP: Supabase initialized.");
   } catch (e) {
-    print("STP ERROR: Supabase init failed: $e");
+    debugPrint("STP ERROR: Supabase init failed: $e");
   }
 
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => MarketProvider()),
         ChangeNotifierProxyProvider<AuthProvider, PortfolioProvider>(
@@ -55,7 +58,7 @@ void main() async {
       child: const StockPulseApp(),
     ),
   );
-  print("STP: runApp called.");
+  debugPrint("STP: runApp called.");
 }
 
 class StockPulseApp extends StatelessWidget {
@@ -63,19 +66,18 @@ class StockPulseApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+
     return MaterialApp(
       title: 'StockPulse',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeProvider.themeMode,
       home: Consumer<AuthProvider>(
         builder: (context, auth, _) {
           if (auth.isInitializing) {
-            return const Scaffold(
-              backgroundColor: AppTheme.background,
-              body: Center(
-                child: CircularProgressIndicator(color: AppTheme.primary),
-              ),
-            );
+            return const SplashScreen();
           }
           if (auth.isAuthenticated) {
             return const DashboardScreen();

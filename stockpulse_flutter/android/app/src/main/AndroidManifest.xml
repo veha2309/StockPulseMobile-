@@ -1,8 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Add this line to enable internet access -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
-        android:label="stockpulse_flutter"
+        android:label="StockPulse"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/launcher_icon">
         <activity
             android:name=".MainActivity"
             android:exported="true"

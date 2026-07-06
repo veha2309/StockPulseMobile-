@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import 'register_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
+import 'dashboard_screen.dart'; // Import your main dashboard screen
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,10 +18,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _branchController = TextEditingController();
   final _enrollmentController = TextEditingController();
-  bool _isRegister = false;
+  bool _isRegister = false; // Changed to non-final to allow toggling
 
   void _submit() async {
     final auth = context.read<AuthProvider>();
+    final messenger = ScaffoldMessenger.of(context);
     try {
       if (_isRegister) {
         await auth.register(
@@ -34,8 +35,16 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         await auth.login(_emailController.text, _passwordController.text);
       }
+
+      // This is the crucial fix. After login or registration, if the widget is still
+      // mounted, we replace the entire navigation stack with the Dashboard.
+      // This prevents the "black screen" issue.
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const DashboardScreen()), (route) => false);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text(e.toString()), backgroundColor: AppTheme.secondary),
       );
     }
@@ -43,80 +52,73 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    print("STP: LoginScreen rendering...");
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          color: AppTheme.background,
-          gradient: RadialGradient(
-            center: Alignment.topRight,
-            radius: 1.5,
-            colors: [
-              Color(0xFF0F1930),
-              AppTheme.background,
-            ],
-          ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.account_balance_wallet_rounded, size: 64, color: AppTheme.primary),
-                const SizedBox(height: 16),
-                Text(
-                  _isRegister ? "Join StockPulse" : "Welcome Back",
-                  style: textTheme.displayLarge,
-                ),
-                Text(
-                  _isRegister ? "Create your trading account" : "Sign in to continue trading",
-                  style: textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 48),
-                GlassCard(
-                  child: Column(
-                    children: [
-                      if (_isRegister) ...[
-                        _buildField(_nameController, "Full Name", Icons.person),
-                        const SizedBox(height: 16),
-                        _buildField(_branchController, "Branch", Icons.school),
-                        const SizedBox(height: 16),
-                        _buildField(_enrollmentController, "Enrollment Number", Icons.numbers),
-                        const SizedBox(height: 16),
-                      ],
-                      _buildField(_emailController, "Email Address", Icons.email),
+      backgroundColor: AppTheme.background,
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.account_balance_wallet_rounded, size: 64, color: AppTheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                _isRegister ? "Join StockPulse" : "Welcome Back",
+                style: textTheme.displayLarge?.copyWith(color: AppTheme.onSurface),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _isRegister ? "Create your trading account" : "Sign in to continue trading",
+                style: textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 48),
+              GlassCard(
+                child: Column(
+                  children: [
+                    if (_isRegister) ...[
+                      _buildField(_nameController, "Full Name", Icons.person),
                       const SizedBox(height: 16),
-                      _buildField(_passwordController, "Password", Icons.lock, obscure: true),
-                      const SizedBox(height: 32),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: context.watch<AuthProvider>().isLoading ? null : _submit,
-                          child: context.watch<AuthProvider>().isLoading
-                              ? const CircularProgressIndicator()
-                              : Text(_isRegister ? "REGISTER" : "LOGIN"),
-                        ),
-                      ),
+                      _buildField(_branchController, "Branch", Icons.school),
+                      const SizedBox(height: 16),
+                      _buildField(_enrollmentController, "Enrollment Number", Icons.numbers),
+                      const SizedBox(height: 16),
                     ],
-                  ),
+                    _buildField(_emailController, "Email Address", Icons.email),
+                    const SizedBox(height: 16),
+                    _buildField(_passwordController, "Password", Icons.lock, obscure: true),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed: context.watch<AuthProvider>().isLoading ? null : _submit,
+                        child: context.watch<AuthProvider>().isLoading
+                            ? const CircularProgressIndicator(color: Colors.black)
+                            : Text(
+                                _isRegister ? "REGISTER" : "LOGIN",
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 24),
-                TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                  ),
-                  child: Text(
-                    "Don't have an account? Register",
-                    style: const TextStyle(color: AppTheme.onSurfaceVariant),
-                  ),
+              ),
+              const SizedBox(height: 24),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _isRegister = !_isRegister;
+                  });
+                },
+                child: Text(
+                  _isRegister ? "Already have an account? Login" : "Don't have an account? Register",
+                  style: const TextStyle(
+                      color: AppTheme.primary, fontWeight: FontWeight.bold),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -127,13 +129,13 @@ class _LoginScreenState extends State<LoginScreen> {
     return TextField(
       controller: controller,
       obscureText: obscure,
-      style: const TextStyle(color: AppTheme.onSurface),
+      style: TextStyle(color: AppTheme.onSurface),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: AppTheme.onSurfaceVariant),
+        labelStyle: TextStyle(color: AppTheme.onSurfaceVariant),
         prefixIcon: Icon(icon, color: AppTheme.primary, size: 20),
         filled: true,
-        fillColor: Colors.black.withValues(alpha: 0.2),
+        fillColor: AppTheme.isDark ? Colors.black.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.03),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
