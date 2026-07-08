@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 import '../providers/market_provider.dart';
@@ -24,6 +26,8 @@ class _StockDetailScreenState extends State<StockDetailScreen>
   late PageController _mainPageController;
   double _currentPage = 0;
   bool _isDialActive = false;
+  bool _showDial = false;
+  bool _isMainPageUserScrolling = false;
   late List<String> _dialItems;
 
   late AnimationController _activeModeController;
@@ -88,6 +92,19 @@ class _StockDetailScreenState extends State<StockDetailScreen>
         color: Colors.cyanAccent,
       ),
     ];
+  }
+
+  void _setShowDial(bool value) {
+    if (_showDial == value) return;
+    setState(() {
+      _showDial = value;
+      if (_showDial || _isDialActive) {
+        _activeModeController.forward();
+      } else {
+        _activeModeController.reverse();
+      }
+    });
+    HapticFeedback.lightImpact();
   }
 
   void _onPageScroll() {
@@ -299,21 +316,7 @@ class _StockDetailScreenState extends State<StockDetailScreen>
   Widget build(BuildContext context) {
     final market = context.watch<MarketProvider>();
 
-    final freshItems = _buildDialItems(market);
-    if (freshItems.length != _dialItems.length ||
-        !freshItems.every((s) => _dialItems.contains(s))) {
-      final currentSymbol =
-          _dialItems[_currentPage.round().clamp(0, _dialItems.length - 1)];
-      _dialItems = freshItems;
-      final newIndex = _dialItems
-          .indexOf(currentSymbol)
-          .clamp(0, _dialItems.length - 1);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _mainPageController.hasClients) {
-          _mainPageController.jumpToPage(newIndex);
-        }
-      });
-    }
+
 
     final currentIndex = _currentPage.round().clamp(0, _dialItems.length - 1);
     final currentSymbol = _dialItems[currentIndex];
@@ -383,19 +386,48 @@ class _StockDetailScreenState extends State<StockDetailScreen>
       ),
       body: Stack(
         children: [
-          PageView.builder(
-            controller: _mainPageController,
-            itemCount: _dialItems.length,
-            onPageChanged: (index) => market.fetchMarketData(_dialItems[index]),
-            itemBuilder: (context, index) => _buildStockCard(_dialItems[index]),
+          NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification is UserScrollNotification) {
+                setState(() {
+                  _isMainPageUserScrolling = notification.direction != ScrollDirection.idle;
+                });
+              }
+              return false;
+            },
+            child: PageView.builder(
+              controller: _mainPageController,
+              itemCount: _dialItems.length,
+              onPageChanged: (index) => market.fetchMarketData(_dialItems[index]),
+              itemBuilder: (context, index) => _buildStockCard(_dialItems[index]),
+            ),
           ),
 
-          Positioned(
-            bottom: 0,
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !_showDial,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 300),
+                opacity: _showDial ? 1.0 : 0.0,
+                child: GestureDetector(
+                  onTap: () => _setShowDial(false),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    color: Colors.transparent,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOutCubic,
+            bottom: _showDial ? 0 : -220,
             left: 0,
             right: 0,
             child: Container(
-              padding: const EdgeInsets.only(top: 10, bottom: 20),
+              padding: const EdgeInsets.only(top: 4, bottom: 20),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -407,29 +439,88 @@ class _StockDetailScreenState extends State<StockDetailScreen>
                   ],
                 ),
               ),
-              child: ArcPortfolioDial(
-                items: _dialItems,
-                initialIndex: _mainPageController.initialPage,
-                externalPage: _currentPage,
-                onScrollStateChanged: (active) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      setState(() => _isDialActive = active);
-                      active
-                          ? _activeModeController.forward()
-                          : _activeModeController.reverse();
-                    }
-                  });
-                },
-                onSelectedItemChanged: (index) {
-                  if (index != _mainPageController.page?.round()) {
-                    _mainPageController.animateToPage(
-                      index,
-                      duration: const Duration(milliseconds: 700),
-                      curve: Curves.easeOutBack,
-                    );
-                  }
-                },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: () => _setShowDial(false),
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                      child: Container(
+                        width: 44,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: AppTheme.onSurfaceVariant.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                    ),
+                  ),
+                  ArcPortfolioDial(
+                    items: _dialItems,
+                    initialIndex: _mainPageController.initialPage,
+                    externalPage: _isMainPageUserScrolling ? currentIndex.toDouble() : null,
+                    onScrollStateChanged: (active) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          setState(() => _isDialActive = active);
+                          if (_showDial || active) {
+                            _activeModeController.forward();
+                          } else {
+                            _activeModeController.reverse();
+                          }
+                        }
+                      });
+                    },
+                    onSelectedItemChanged: (index) {
+                      if (index != _mainPageController.page?.round()) {
+                        _mainPageController.animateToPage(
+                          index,
+                          duration: const Duration(milliseconds: 700),
+                          curve: Curves.easeOutBack,
+                        );
+                      }
+                    },
+                    onPageScroll: (page) {
+                      if (_mainPageController.hasClients) {
+                        final screenWidth = MediaQuery.of(context).size.width;
+                        _mainPageController.jumpTo(page * screenWidth);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          Positioned(
+            bottom: 24,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: AnimatedSlide(
+                offset: _showDial ? const Offset(0, 2) : Offset.zero,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutBack,
+                child: AnimatedOpacity(
+                  opacity: _showDial ? 0.0 : 1.0,
+                  duration: const Duration(milliseconds: 250),
+                  child: FloatingActionButton.extended(
+                    onPressed: _showDial ? null : () => _setShowDial(true),
+                    icon: const Icon(Icons.blur_circular_rounded, color: Colors.black),
+                    label: const Text(
+                      "QUICK DIAL",
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    backgroundColor: AppTheme.primary,
+                    elevation: 6,
+                  ),
+                ),
               ),
             ),
           ),
@@ -477,7 +568,7 @@ class _StockDetailScreenState extends State<StockDetailScreen>
             else
               Expanded(
                 child: SingleChildScrollView(
-                  physics: _isDialActive
+                  physics: (_isDialActive || _showDial)
                       ? const NeverScrollableScrollPhysics()
                       : const BouncingScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -552,6 +643,10 @@ class _StockDetailScreenState extends State<StockDetailScreen>
   }
 
   Widget _buildPriceHeader(double price) {
+    final market = context.read<MarketProvider>();
+    final dailyChange = market.dailyChangePercent;
+    final isPos = dailyChange >= 0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -564,14 +659,18 @@ class _StockDetailScreenState extends State<StockDetailScreen>
             letterSpacing: -1,
           ),
         ),
-        const Row(
+        Row(
           children: [
-            Icon(Icons.trending_up, color: AppTheme.primary, size: 16),
-            SizedBox(width: 4),
+            Icon(
+              isPos ? Icons.trending_up : Icons.trending_down,
+              color: isPos ? AppTheme.primary : AppTheme.secondary,
+              size: 16,
+            ),
+            const SizedBox(width: 4),
             Text(
-              "+2.45% Today",
+              "${isPos ? '+' : ''}${dailyChange.toStringAsFixed(2)}% Today",
               style: TextStyle(
-                color: AppTheme.primary,
+                color: isPos ? AppTheme.primary : AppTheme.secondary,
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
               ),

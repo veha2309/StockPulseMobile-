@@ -179,6 +179,7 @@ class _RechargeScreenState extends State<RechargeScreen> {
               keyboardType: TextInputType.number,
               style: TextStyle(color: AppTheme.onSurface),
               onTap: () => setState(() => _useCustom = true),
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 hintText: 'Custom amount...',
                 hintStyle: TextStyle(color: AppTheme.onSurfaceVariant),

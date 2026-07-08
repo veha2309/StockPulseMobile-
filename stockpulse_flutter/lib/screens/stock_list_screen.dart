@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../providers/market_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/formatter.dart';
 import '../widgets/glass_card.dart';
 import 'stock_detail_screen.dart';
 
@@ -27,6 +29,9 @@ class _StockListScreenState extends State<StockListScreen> {
   void initState() {
     super.initState();
     _filteredStocks = _trendingStocks;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MarketProvider>().initializeWatchlist();
+    });
   }
 
   void _onSearchChanged(String query) {
@@ -37,6 +42,13 @@ class _StockListScreenState extends State<StockListScreen> {
         _filteredStocks = _trendingStocks
             .where((s) => s.toLowerCase().contains(query.toLowerCase()))
             .toList();
+        
+        final customSymbol = "NSE:${query.trim().toUpperCase()}";
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            context.read<MarketProvider>().fetchSingleQuote(customSymbol);
+          }
+        });
       }
     });
   }
@@ -44,6 +56,7 @@ class _StockListScreenState extends State<StockListScreen> {
   @override
   Widget build(BuildContext context) {
     final market = context.watch<MarketProvider>();
+    final auth = context.watch<AuthProvider>();
     
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -69,7 +82,7 @@ class _StockListScreenState extends State<StockListScreen> {
                       if (market.watchlist.isNotEmpty && _searchController.text.isEmpty) ...[
                         _buildSectionLabel("FAVORITES", Icons.star_rounded),
                         const SizedBox(height: 16),
-                        _buildFavoritesGrid(market),
+                        _buildFavoritesGrid(market, auth),
                         const SizedBox(height: 32),
                       ],
                       _buildSectionLabel(
@@ -77,12 +90,12 @@ class _StockListScreenState extends State<StockListScreen> {
                         Icons.trending_up_rounded
                       ),
                       const SizedBox(height: 16),
-                      ..._filteredStocks.map((symbol) => _buildStockItem(market, symbol)),
+                      ..._filteredStocks.map((symbol) => _buildStockItem(market, auth, symbol)),
                       
                       // Handle custom symbol search if not in trending
                       if (_searchController.text.isNotEmpty && 
                           !_filteredStocks.any((s) => s.contains(_searchController.text.toUpperCase())))
-                        _buildStockItem(market, "NSE:${_searchController.text.toUpperCase()}"),
+                        _buildStockItem(market, auth, "NSE:${_searchController.text.toUpperCase()}"),
                         
                       const SizedBox(height: 140), // Space for Arc Dial
                     ],
@@ -164,7 +177,7 @@ class _StockListScreenState extends State<StockListScreen> {
     );
   }
 
-  Widget _buildFavoritesGrid(MarketProvider market) {
+  Widget _buildFavoritesGrid(MarketProvider market, AuthProvider auth) {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -173,27 +186,78 @@ class _StockListScreenState extends State<StockListScreen> {
         crossAxisCount: 2,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 2.5,
+        childAspectRatio: 2.1,
       ),
       itemBuilder: (context, index) {
         final symbol = market.watchlist[index];
+        final price = market.stockPrices[symbol] ?? 0.0;
+        final change = market.stockChanges[symbol] ?? 0.0;
+
+        final holdings = (auth.user?.portfolio ?? [])
+            .where((p) => p.symbol == symbol)
+            .toList();
+        final bool hasHolding = holdings.isNotEmpty;
+
+        double pnl = 0;
+        if (hasHolding) {
+          for (var item in holdings) {
+            final currentPrice = price > 0 ? price : item.avgBuyPrice;
+            pnl += (currentPrice - item.avgBuyPrice) * item.amount;
+          }
+        }
+
         return GlassCard(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           onTap: () {
             market.fetchMarketData(symbol);
             Navigator.push(context, MaterialPageRoute(builder: (_) => const StockDetailScreen()));
           },
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  symbol.split(':').last,
-                  style: TextStyle(color: AppTheme.onSurface, fontWeight: FontWeight.bold, fontSize: 13),
-                  overflow: TextOverflow.ellipsis,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      symbol.split(':').last,
+                      style: TextStyle(color: AppTheme.onSurface, fontWeight: FontWeight.bold, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (hasHolding)
+                    Text(
+                      pnl == 0 ? '₹0.00' : formatINRSigned(pnl),
+                      style: TextStyle(
+                        color: pnl >= 0 ? AppTheme.primary : AppTheme.secondary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    )
+                  else
+                    const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
+                ],
               ),
+              if (price > 0) ...[
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "₹${price.toStringAsFixed(1)}",
+                      style: TextStyle(color: AppTheme.onSurfaceVariant, fontSize: 10),
+                    ),
+                    Text(
+                      "${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%",
+                      style: TextStyle(
+                        color: change >= 0 ? AppTheme.primary : AppTheme.secondary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         );
@@ -201,9 +265,26 @@ class _StockListScreenState extends State<StockListScreen> {
     );
   }
 
-  Widget _buildStockItem(MarketProvider market, String symbol) {
+  Widget _buildStockItem(MarketProvider market, AuthProvider auth, String symbol) {
     final displaySymbol = symbol.split(':').last;
     final bool isFavorite = market.watchlist.contains(symbol);
+
+    final holdings = (auth.user?.portfolio ?? [])
+        .where((p) => p.symbol == symbol)
+        .toList();
+    final bool hasHolding = holdings.isNotEmpty;
+
+    // Use cached prices and changes if available
+    final price = market.stockPrices[symbol] ?? 0.0;
+    final change = market.stockChanges[symbol] ?? 0.0;
+
+    double pnl = 0;
+    if (hasHolding) {
+      for (var item in holdings) {
+        final currentPrice = price > 0 ? price : item.avgBuyPrice;
+        pnl += (currentPrice - item.avgBuyPrice) * item.amount;
+      }
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -235,18 +316,59 @@ class _StockListScreenState extends State<StockListScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(displaySymbol, style: TextStyle(color: AppTheme.onSurface, fontWeight: FontWeight.bold)),
-                  Text("NSE Equity", style: TextStyle(color: AppTheme.onSurfaceVariant, fontSize: 11)),
+                  Row(
+                    children: [
+                      Text("NSE Equity", style: TextStyle(color: AppTheme.onSurfaceVariant, fontSize: 11)),
+                      Text("  ·  ", style: TextStyle(color: AppTheme.onSurfaceVariant, fontSize: 11)),
+                      Text(
+                        price > 0
+                            ? "₹${price.toStringAsFixed(2)} (${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%)"
+                            : "₹--- (-.-%)",
+                        style: TextStyle(
+                          color: price > 0
+                              ? (change >= 0 ? AppTheme.primary : AppTheme.secondary)
+                              : AppTheme.onSurfaceVariant,
+                          fontSize: 11,
+                          fontWeight: price > 0 ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            GestureDetector(
-              onTap: () => market.toggleFavorite(symbol),
-              child: Icon(
-                isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                color: isFavorite ? Colors.amber : AppTheme.onSurfaceVariant,
-                size: 20,
+            if (hasHolding)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: pnl >= 0
+                      ? AppTheme.primary.withValues(alpha: 0.12)
+                      : AppTheme.secondary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: pnl >= 0
+                        ? AppTheme.primary.withValues(alpha: 0.25)
+                        : AppTheme.secondary.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Text(
+                  pnl == 0 ? '₹0.00' : formatINRSigned(pnl),
+                  style: TextStyle(
+                    color: pnl >= 0 ? AppTheme.primary : AppTheme.secondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )
+            else
+              GestureDetector(
+                onTap: () => market.toggleFavorite(symbol),
+                child: Icon(
+                  isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: isFavorite ? Colors.amber : AppTheme.onSurfaceVariant,
+                  size: 20,
+                ),
               ),
-            ),
             const SizedBox(width: 8),
             Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.onSurfaceVariant, size: 14),
           ],

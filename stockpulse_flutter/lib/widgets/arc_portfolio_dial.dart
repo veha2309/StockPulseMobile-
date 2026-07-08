@@ -9,6 +9,7 @@ class ArcPortfolioDial extends StatefulWidget {
   final double? externalPage;
   final Function(int) onSelectedItemChanged;
   final Function(bool)? onScrollStateChanged;
+  final Function(double)? onPageScroll;
 
   const ArcPortfolioDial({
     super.key,
@@ -17,6 +18,7 @@ class ArcPortfolioDial extends StatefulWidget {
     this.externalPage,
     required this.onSelectedItemChanged,
     this.onScrollStateChanged,
+    this.onPageScroll,
   });
 
   @override
@@ -87,11 +89,13 @@ class _ArcPortfolioDialState extends State<ArcPortfolioDial>
     setState(() => _currentPage = page);
 
     final snapped = page.round();
-    // Wider threshold (0.2) makes haptics feel "stickier" during free scroll
     if (snapped != _lastSnapped && (snapped - page).abs() < 0.2) {
       HapticFeedback.selectionClick();
       _lastSnapped = snapped;
-      if (_userScrolling) widget.onSelectedItemChanged(snapped);
+    }
+
+    if (_userScrolling) {
+      widget.onPageScroll?.call(page);
     }
   }
 
@@ -119,18 +123,18 @@ class _ArcPortfolioDialState extends State<ArcPortfolioDial>
           widget.onScrollStateChanged?.call(false);
           HapticFeedback.lightImpact();
 
-          // Manual smooth snap to the nearest item at the end of a free scroll
           final page = _controller.page ?? 0;
-          final snapped = page.round();
-          if ((page - snapped).abs() > 0.01) {
-            _syncing = true;
-            _controller.animateToPage(
-              snapped,
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.easeOutCubic,
-            ).then((_) => _syncing = false);
-            widget.onSelectedItemChanged(snapped);
-          }
+          final snapped = page.round().clamp(0, widget.items.length - 1);
+          
+          _syncing = true;
+          _controller.animateToPage(
+            snapped,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          ).then((_) {
+            _syncing = false;
+          });
+          widget.onSelectedItemChanged(snapped);
         }
         return false;
       },

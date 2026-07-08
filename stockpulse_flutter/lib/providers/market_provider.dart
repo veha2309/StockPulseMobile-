@@ -63,6 +63,24 @@ class MarketProvider extends ChangeNotifier {
   List<CandleData> intradayChartData = [];
   bool isLoading = false;
   String currentSymbol = "NSE:NIFTY50";
+
+  Map<String, double> stockPrices = {};
+  Map<String, double> stockChanges = {};
+
+  static const trendingStocks = [
+    "NSE:RELIANCE", "NSE:TCS", "NSE:HDFCBANK", "NSE:INFY", "NSE:ICICIBANK",
+    "NSE:HINDUNILVR", "NSE:SBIN", "NSE:BHARTIARTL", "NSE:ITC", "NSE:KOTAKBANK",
+    "NSE:LT", "NSE:AXISBANK", "NSE:ASIANPAINT", "NSE:MARUTI", "NSE:TITAN",
+  ];
+
+  double get dailyChangePercent {
+    if (underlyingPrice <= 0) return 0.0;
+    final openPrice = intradayChartData.isNotEmpty
+        ? intradayChartData.first.open
+        : (chartData.isNotEmpty ? chartData.last.open : 0.0);
+    if (openPrice <= 0) return 0.0;
+    return ((underlyingPrice - openPrice) / openPrice * 100);
+  }
   List<String> watchlist = [
     "NSE:RELIANCE",
     "NSE:TCS",
@@ -85,14 +103,27 @@ class MarketProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint("STP ERROR: Failed to persist favorites: $e");
     }
+    fetchAllQuotes();
   }
 
   MarketProvider() {
     // It's safer to check if Supabase is initialized before using it.
     // The actual initialization should be awaited in main.dart
     if (Supabase.instance.client.auth.currentUser != null) {
+      _isWatchlistInitialized = true;
       _init();
     }
+  }
+
+  bool _isWatchlistInitialized = false;
+
+  Future<void> initializeWatchlist() async {
+    if (_isWatchlistInitialized) {
+      fetchAllQuotes();
+      return;
+    }
+    _isWatchlistInitialized = true;
+    await _init();
   }
 
   Future<void> _init() async {
@@ -128,10 +159,92 @@ class MarketProvider extends ChangeNotifier {
       debugPrint("STP ERROR: Failed to load global favorites: $e");
     } finally {
       debugPrint("STP: Final watchlist: $watchlist");
+      fetchAllQuotes();
     }
   }
 
+  Future<void> fetchAllQuotes() async {
+    final allSymbols = <String>{
+      ...watchlist,
+      ...trendingStocks,
+    }.toList();
+
+    if (allSymbols.isEmpty) return;
+
+    try {
+      final futures = allSymbols.map((symbol) async {
+        final yfSymbol = _toYahooSymbol(symbol);
+        final url = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$yfSymbol?interval=1d&range=1mo');
+        try {
+          final response = await http.get(url, headers: {"User-Agent": "Mozilla/5.0"});
+          if (response.statusCode == 200) {
+            final decoded = jsonDecode(response.body);
+            final result = decoded['chart']['result'];
+            if (result != null && result.isNotEmpty) {
+              final price = (result[0]['meta']['regularMarketPrice'] ?? 0.0).toDouble();
+              final previousClose = (result[0]['meta']['previousClose'] ?? 0.0).toDouble();
+              
+              double changePct = 0.0;
+              if (previousClose > 0) {
+                changePct = ((price - previousClose) / previousClose * 100);
+              } else {
+                final indicators = result[0]['indicators']['quote'][0];
+                final opens = indicators['open'] as List<dynamic>?;
+                if (opens != null && opens.isNotEmpty && opens.last != null) {
+                  final openPrice = (opens.last).toDouble();
+                  if (openPrice > 0) {
+                    changePct = ((price - openPrice) / openPrice * 100);
+                  }
+                }
+              }
+
+              stockPrices[symbol] = price;
+              stockChanges[symbol] = changePct;
+            }
+          }
+        } catch (e) {
+          debugPrint("STP ERROR: Failed fetching quote for $symbol: $e");
+        }
+      });
+
+      await Future.wait(futures);
+      notifyListeners();
+    } catch (e) {
+      debugPrint("STP ERROR: Failed to fetch all parallel quotes: $e");
+    }
+  }
+
+  Future<void> fetchSingleQuote(String symbol) async {
+    if (stockPrices.containsKey(symbol) && stockPrices[symbol]! > 0) return;
+    final yfSymbol = _toYahooSymbol(symbol);
+    final url = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$yfSymbol?interval=1d&range=1mo');
+
+    try {
+      final response = await http.get(url, headers: {"User-Agent": "Mozilla/5.0"});
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        final result = decoded['chart']['result'];
+        if (result != null && result.isNotEmpty) {
+          final price = (result[0]['meta']['regularMarketPrice'] ?? 0.0).toDouble();
+          final previousClose = (result[0]['meta']['previousClose'] ?? 0.0).toDouble();
+          double changePct = 0.0;
+          if (previousClose > 0) {
+            changePct = ((price - previousClose) / previousClose * 100);
+          }
+          stockPrices[symbol] = price;
+          stockChanges[symbol] = changePct;
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint("STP ERROR: Failed to fetch single quote for $symbol: $e");
+    }
+  }
+
+  String _latestRequestedSymbol = "";
+
   Future<void> fetchMarketData(String symbol) async {
+    _latestRequestedSymbol = symbol;
     currentSymbol = symbol;
     isLoading = true;
     notifyListeners();
@@ -151,6 +264,11 @@ class MarketProvider extends ChangeNotifier {
         http.get(monthlyUrl, headers: {"User-Agent": "Mozilla/5.0"}),
         http.get(intradayUrl, headers: {"User-Agent": "Mozilla/5.0"}),
       ]);
+
+      if (_latestRequestedSymbol != symbol) {
+        debugPrint("STP: Ignoring stale market data for $symbol");
+        return;
+      }
 
       if (responses[0].statusCode == 200) {
         final data = jsonDecode(responses[0].body);
