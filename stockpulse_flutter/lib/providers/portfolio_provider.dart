@@ -53,7 +53,7 @@ class PortfolioProvider extends ChangeNotifier {
         'timestamp': DateTime.now().toIso8601String(),
       });
 
-      await _auth!.refreshUser(user.email);
+      // User updates will sync automatically via Supabase Realtime
     } catch (e) {
       rethrow;
     } finally {
@@ -122,7 +122,7 @@ class PortfolioProvider extends ChangeNotifier {
         'timestamp': DateTime.now().toIso8601String(),
       });
 
-      await _auth!.refreshUser(user.email);
+      // User updates will sync automatically via Supabase Realtime
     } catch (e) {
       rethrow;
     } finally {
@@ -215,7 +215,7 @@ class PortfolioProvider extends ChangeNotifier {
         'timestamp': now,
       });
 
-      await _auth!.refreshUser(user.email);
+      // User updates will sync automatically via Supabase Realtime
     } catch (e) {
       rethrow;
     } finally {
@@ -252,7 +252,7 @@ class PortfolioProvider extends ChangeNotifier {
         'portfolio': portfolio.map((e) => e.toJson()).toList(),
       }).eq('email', user.email);
 
-      await _auth!.refreshUser(user.email);
+      // User updates will sync automatically via Supabase Realtime
     } catch (e) {
       rethrow;
     } finally {

@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import 'dashboard_screen.dart'; // Import your main dashboard screen
+import 'otp_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,32 +17,69 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
-  final _branchController = TextEditingController();
-  final _enrollmentController = TextEditingController();
   bool _isRegister = false; // Changed to non-final to allow toggling
 
   void _submit() async {
     final auth = context.read<AuthProvider>();
     final messenger = ScaffoldMessenger.of(context);
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    // Field validations
+    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (!emailRegex.hasMatch(email)) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Enter a valid email address"), backgroundColor: AppTheme.secondary),
+      );
+      return;
+    }
+
+    if (_isRegister) {
+      final name = _nameController.text.trim();
+      if (name.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text("Name cannot be empty"), backgroundColor: AppTheme.secondary),
+        );
+        return;
+      }
+      if (password.length < 6) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text("Password must be at least 6 characters long"), backgroundColor: AppTheme.secondary),
+        );
+        return;
+      }
+    } else {
+      if (password.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text("Password cannot be empty"), backgroundColor: AppTheme.secondary),
+        );
+        return;
+      }
+    }
+
     try {
       if (_isRegister) {
-        await auth.register(
-          name: _nameController.text,
-          email: _emailController.text,
-          password: _passwordController.text,
-          branch: _branchController.text,
-          enrollment: _enrollmentController.text,
-        );
+        final name = _nameController.text.trim();
+        final success = await auth.sendOtp(email);
+        if (success && mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OtpVerificationScreen(
+                name: name,
+                email: email,
+                password: password,
+              ),
+            ),
+          );
+        }
       } else {
-        await auth.login(_emailController.text, _passwordController.text);
-      }
-
-      // This is the crucial fix. After login or registration, if the widget is still
-      // mounted, we replace the entire navigation stack with the Dashboard.
-      // This prevents the "black screen" issue.
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const DashboardScreen()), (route) => false);
+        await auth.login(email, password);
+        // After login, if the widget is still mounted, replace the entire navigation stack with Dashboard
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(builder: (context) => const DashboardScreen()), (route) => false);
+        }
       }
     } catch (e) {
       messenger.showSnackBar(
@@ -79,10 +117,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     if (_isRegister) ...[
                       _buildField(_nameController, "Full Name", Icons.person),
-                      const SizedBox(height: 16),
-                      _buildField(_branchController, "Branch", Icons.school),
-                      const SizedBox(height: 16),
-                      _buildField(_enrollmentController, "Enrollment Number", Icons.numbers),
                       const SizedBox(height: 16),
                     ],
                     _buildField(_emailController, "Email Address", Icons.email),

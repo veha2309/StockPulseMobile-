@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
+import 'otp_verification_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -15,21 +16,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
-  final _branchController = TextEditingController();
-  final _enrollmentController = TextEditingController();
 
   void _submit() async {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Name cannot be empty"), backgroundColor: AppTheme.secondary),
+      );
+      return;
+    }
+
+    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (!emailRegex.hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter a valid email address"), backgroundColor: AppTheme.secondary),
+      );
+      return;
+    }
+
+    if (password.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Password must be at least 6 characters long"), backgroundColor: AppTheme.secondary),
+      );
+      return;
+    }
+
     final auth = context.read<AuthProvider>();
     try {
-      await auth.register(
-        name: _nameController.text,
-        email: _emailController.text,
-        password: _passwordController.text,
-        branch: _branchController.text,
-        enrollment: _enrollmentController.text,
-      );
-      if (!mounted) return;
-      Navigator.pop(context); 
+      final success = await auth.sendOtp(email);
+      if (success && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => OtpVerificationScreen(
+              name: name,
+              email: email,
+              password: password,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -71,10 +100,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 child: Column(
                   children: [
                     _buildField(_nameController, "Full Name", Icons.person),
-                    const SizedBox(height: 16),
-                    _buildField(_branchController, "Branch", Icons.school),
-                    const SizedBox(height: 16),
-                    _buildField(_enrollmentController, "Enrollment Number", Icons.numbers),
                     const SizedBox(height: 16),
                     _buildField(_emailController, "Email Address", Icons.email),
                     const SizedBox(height: 16),

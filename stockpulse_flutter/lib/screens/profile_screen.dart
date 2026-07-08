@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:stockpulse_flutter/screens/login_screen.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_theme.dart';
@@ -17,8 +18,6 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen>
     with SingleTickerProviderStateMixin {
   final _nameController = TextEditingController();
-  final _branchController = TextEditingController();
-  final _enrollmentController = TextEditingController();
   bool _isEditing = false;
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
@@ -34,16 +33,12 @@ class _ProfileScreenState extends State<ProfileScreen>
     final user = context.read<AuthProvider>().user;
     if (user != null) {
       _nameController.text = user.name;
-      _branchController.text = user.branch;
-      _enrollmentController.text = user.enrollment;
     }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _branchController.dispose();
-    _enrollmentController.dispose();
     _fadeCtrl.dispose();
     super.dispose();
   }
@@ -212,14 +207,6 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _badge(user.branch, AppTheme.primary),
-              const SizedBox(width: 8),
-              _badge(user.enrollment, AppTheme.primary),
-            ],
-          ),
         ],
       ),
     );
@@ -358,11 +345,6 @@ class _ProfileScreenState extends State<ProfileScreen>
           ),
           const SizedBox(height: 20),
           _buildTextField(_nameController, 'Full Name', Icons.person_outline),
-          const SizedBox(height: 14),
-          _buildTextField(_branchController, 'Branch', Icons.school_outlined),
-          const SizedBox(height: 14),
-          _buildTextField(_enrollmentController, 'Enrollment Number',
-              Icons.numbers_outlined),
           const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
@@ -380,8 +362,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                       try {
                         await auth.updateProfile(
                           name: _nameController.text,
-                          branch: _branchController.text,
-                          enrollment: _enrollmentController.text,
                         );
                         setState(() => _isEditing = false);
                         if (!mounted) return;
@@ -439,7 +419,15 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
   }
-
+  
+  void logOut(AuthProvider auth) {
+    auth.logout();
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
+  }
   Widget _buildLogoutButton(BuildContext context, AuthProvider auth) {
     return SizedBox(
       width: double.infinity,
@@ -448,7 +436,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           foregroundColor: AppTheme.secondary,
           padding: const EdgeInsets.symmetric(vertical: 16),
         ),
-        onPressed: () => auth.logout(),
+        onPressed: () => logOut(auth),
         icon: const Icon(Icons.logout_rounded),
         label: const Text('LOG OUT',
             style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),

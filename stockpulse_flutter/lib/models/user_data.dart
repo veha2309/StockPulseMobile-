@@ -1,8 +1,6 @@
 class UserData {
   final String name;
   final String email;
-  final String branch;
-  final String enrollment;
   final double eTokens;
   final List<PortfolioItem> portfolio;
   final List<OptionPosition> options;
@@ -10,8 +8,6 @@ class UserData {
   UserData({
     required this.name,
     required this.email,
-    required this.branch,
-    required this.enrollment,
     required this.eTokens,
     required this.portfolio,
     required this.options,
@@ -21,8 +17,6 @@ class UserData {
     return UserData(
       name: json['name'] ?? '',
       email: json['email'] ?? '',
-      branch: json['branch'] ?? '',
-      enrollment: json['enrollment'] ?? '',
       eTokens: (json['e_tokens'] ?? json['etokens'] ?? json['eTokens'] ?? 0).toDouble(),
       portfolio: (json['portfolio'] as List<dynamic>?)
               ?.map((e) => PortfolioItem.fromJson(e))
@@ -39,8 +33,6 @@ class UserData {
     return {
       'name': name,
       'email': email,
-      'branch': branch,
-      'enrollment': enrollment,
       'etokens': eTokens,
       'e_tokens': eTokens,
       'portfolio': portfolio.map((e) => e.toJson()).toList(),
