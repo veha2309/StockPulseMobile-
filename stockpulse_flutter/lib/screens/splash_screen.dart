@@ -140,7 +140,7 @@ class _SplashScreenState extends State<SplashScreen>
                   top: -100,
                   left: -60,
                   child: _Orb(
-                    color: AppTheme.primary.withValues(alpha: 0.08),
+                    color: AppTheme.primary.withValues(alpha: 0.09),
                     size: 320,
                   ),
                 ),
@@ -148,8 +148,16 @@ class _SplashScreenState extends State<SplashScreen>
                   bottom: -80,
                   right: -60,
                   child: _Orb(
-                    color: AppTheme.primary.withValues(alpha: 0.05),
-                    size: 240,
+                    color: AppTheme.violet.withValues(alpha: 0.08),
+                    size: 260,
+                  ),
+                ),
+                Positioned(
+                  top: 200,
+                  right: -40,
+                  child: _Orb(
+                    color: AppTheme.blue.withValues(alpha: 0.06),
+                    size: 200,
                   ),
                 ),
               ],
@@ -172,7 +180,7 @@ class _SplashScreenState extends State<SplashScreen>
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: AppTheme.primary.withValues(alpha: 0.2),
+                                  color: AppTheme.violet.withValues(alpha: 0.22),
                                   width: 1.0,
                                 ),
                               ),
@@ -189,7 +197,7 @@ class _SplashScreenState extends State<SplashScreen>
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: AppTheme.primary.withValues(alpha: 0.4),
+                                  color: AppTheme.primary.withValues(alpha: 0.45),
                                   width: 1.5,
                                 ),
                               ),
@@ -286,11 +294,13 @@ class _SplashScreenState extends State<SplashScreen>
                             borderRadius: BorderRadius.circular(10),
                             child: LinearProgressIndicator(
                               value: _barProgress.value,
-                              minHeight: 2.5,
+                              minHeight: 3,
                               backgroundColor: AppTheme.isDark 
                                   ? Colors.white.withValues(alpha: 0.08)
                                   : AppTheme.primary.withValues(alpha: 0.12),
-                              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Color.lerp(AppTheme.primary, AppTheme.violet, _barProgress.value) ?? AppTheme.primary,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 14),

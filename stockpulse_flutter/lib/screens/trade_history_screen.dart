@@ -27,16 +27,16 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
   Future<void> _fetchTrades() async {
     final auth = context.read<AuthProvider>();
     if (auth.user == null) return;
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
     try {
       final res = await _supabase
           .from('trades')
           .select()
           .eq('email', auth.user!.email)
           .order('timestamp', ascending: false);
-      setState(() { _trades = res; _isLoading = false; });
+      if (mounted) setState(() { _trades = res; _isLoading = false; });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -46,7 +46,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
       backgroundColor: AppTheme.background,
       body: Stack(
         children: [
-          if (AppTheme.isDark)
+          if (AppTheme.isDark) ...[
             Positioned(
               top: -60,
               right: -80,
@@ -56,12 +56,28 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(colors: [
-                    AppTheme.primary.withValues(alpha: 0.08),
+                    AppTheme.violet.withValues(alpha: 0.08),
                     Colors.transparent,
                   ]),
                 ),
               ),
             ),
+            Positioned(
+              bottom: 80,
+              left: -60,
+              child: Container(
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [
+                    AppTheme.blue.withValues(alpha: 0.06),
+                    Colors.transparent,
+                  ]),
+                ),
+              ),
+            ),
+          ],
           SafeArea(
             child: Column(
               children: [
@@ -93,25 +109,54 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       child: Row(
         children: [
-          Text(
-            'Trade History',
-            style: Theme.of(context)
-                .textTheme
-                .headlineMedium
-                ?.copyWith(fontWeight: FontWeight.bold, color: AppTheme.onSurface),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 3,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.amberGradient,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'HISTORY',
+                    style: TextStyle(
+                      color: AppTheme.amber,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              ShaderMask(
+                shaderCallback: (bounds) => AppTheme.amberGradient.createShader(bounds),
+                blendMode: BlendMode.srcIn,
+                child: Text(
+                  'Trade History',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: AppTheme.isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+              color: AppTheme.blue.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.borderColor),
+              border: Border.all(color: AppTheme.blue.withValues(alpha: 0.25)),
             ),
             child: Text(
               '${_trades.length} trades',
               style: TextStyle(
-                color: AppTheme.onSurfaceVariant,
+                color: AppTheme.blue,
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
@@ -166,20 +211,25 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
                   height: 44,
                   decoration: BoxDecoration(
                     color: isBuy
-                        ? AppTheme.primary.withValues(alpha: 0.12)
-                        : AppTheme.secondary.withValues(alpha: 0.12),
+                        ? AppTheme.emerald.withValues(alpha: 0.12)
+                        : AppTheme.rose.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: isBuy
-                          ? AppTheme.primary.withValues(alpha: 0.25)
-                          : AppTheme.secondary.withValues(alpha: 0.25),
+                          ? AppTheme.emerald.withValues(alpha: 0.28)
+                          : AppTheme.rose.withValues(alpha: 0.28),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isBuy ? AppTheme.emerald : AppTheme.rose).withValues(alpha: AppTheme.isDark ? 0.14 : 0.06),
+                        blurRadius: 8,
+                        spreadRadius: -2,
+                      ),
+                    ],
                   ),
                   child: Icon(
-                    isBuy
-                        ? Icons.arrow_downward_rounded
-                        : Icons.arrow_upward_rounded,
-                    color: isBuy ? AppTheme.primary : AppTheme.secondary,
+                    isBuy ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+                    color: isBuy ? AppTheme.emerald : AppTheme.rose,
                     size: 20,
                   ),
                 ),
@@ -211,20 +261,20 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: isBuy
-                            ? AppTheme.primary.withValues(alpha: 0.1)
-                            : AppTheme.secondary.withValues(alpha: 0.1),
+                            ? AppTheme.emerald.withValues(alpha: 0.13)
+                            : AppTheme.rose.withValues(alpha: 0.13),
                         borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isBuy ? AppTheme.emerald.withValues(alpha: 0.25) : AppTheme.rose.withValues(alpha: 0.25),
+                        ),
                       ),
                       child: Text(
                         isBuy ? 'BUY' : 'SELL',
                         style: TextStyle(
-                            color: isBuy
-                                ? AppTheme.primary
-                                : AppTheme.secondary,
+                            color: isBuy ? AppTheme.emerald : AppTheme.rose,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 0.8),

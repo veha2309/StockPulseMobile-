@@ -70,7 +70,22 @@ class _ProfileScreenState extends State<ProfileScreen>
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(colors: [
-                    AppTheme.primary.withValues(alpha: 0.08),
+                    AppTheme.violet.withValues(alpha: 0.09),
+                    Colors.transparent,
+                  ]),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 180,
+              right: -60,
+              child: Container(
+                width: 200,
+                height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [
+                    AppTheme.amber.withValues(alpha: 0.07),
                     Colors.transparent,
                   ]),
                 ),
@@ -85,7 +100,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(colors: [
-                    AppTheme.primary.withValues(alpha: 0.05),
+                    AppTheme.blue.withValues(alpha: 0.06),
                     Colors.transparent,
                   ]),
                 ),
@@ -108,10 +123,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _buildSettingsCard(context),
                     const SizedBox(height: 16),
                     _buildRechargeButton(context),
-                    if (_isEditing) ...[
-                      const SizedBox(height: 16),
-                      _buildEditForm(auth),
-                    ],
                     const SizedBox(height: 16),
                     _buildLogoutButton(context, auth),
                     const SizedBox(height: 24),
@@ -135,23 +146,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 fontWeight: FontWeight.bold,
               ),
         ),
-        const Spacer(),
-        GestureDetector(
-          onTap: () => setState(() => _isEditing = !_isEditing),
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppTheme.isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.borderColor),
-            ),
-            child: Icon(
-              _isEditing ? Icons.close_rounded : Icons.edit_rounded,
-              color: AppTheme.primary,
-              size: 20,
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -159,21 +153,24 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget _buildProfileCard(dynamic user) {
     return GlassCard(
       glow: true,
+      accentColor: AppTheme.violet,
       child: Column(
         children: [
-          // Avatar with gradient ring
+          // Avatar with violet→primary gradient ring
           Container(
             width: 88,
             height: 88,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: const LinearGradient(
-                colors: [AppTheme.primary, AppTheme.primaryLight],
+                colors: [AppTheme.violet, AppTheme.primary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
               boxShadow: [
                 BoxShadow(
-                    color: AppTheme.primary.withValues(alpha: AppTheme.isDark ? 0.3 : 0.1),
-                    blurRadius: 20,
+                    color: AppTheme.violet.withValues(alpha: AppTheme.isDark ? 0.35 : 0.12),
+                    blurRadius: 24,
                     spreadRadius: -4),
               ],
             ),
@@ -184,20 +181,71 @@ class _ProfileScreenState extends State<ProfileScreen>
                   shape: BoxShape.circle,
                   color: AppTheme.card,
                 ),
-                child: const Icon(Icons.person_rounded,
-                    color: AppTheme.primary, size: 44),
+                child: const Icon(Icons.person_rounded, color: AppTheme.violet, size: 44),
               ),
             ),
           ),
           const SizedBox(height: 16),
-          Text(
-            user.name,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.onSurface,
-            ),
-          ),
+          _isEditing
+              ? Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(width: 48), // Balance spacing for check button
+                    Expanded(
+                      child: TextField(
+                        controller: _nameController,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.onSurface,
+                        ),
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          hintText: 'Enter Name',
+                          hintStyle: TextStyle(color: AppTheme.onSurfaceVariant),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onSubmitted: (_) => _saveInlineName(),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: _saveInlineName,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.check_rounded,
+                            color: AppTheme.primary, size: 20),
+                      ),
+                    ),
+                  ],
+                )
+              : GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _nameController.text = user.name;
+                      _isEditing = true;
+                    });
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        user.name,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.edit_rounded, color: AppTheme.primary, size: 16),
+                    ],
+                  ),
+                ),
           const SizedBox(height: 6),
           Text(
             user.email,
@@ -212,48 +260,40 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Widget _badge(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Text(text,
-          style: TextStyle(
-              color: color, fontSize: 12, fontWeight: FontWeight.bold)),
-    );
-  }
 
   Widget _buildStatsRow(dynamic user) {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: AnimatedStatCard(
-            label: 'Cash Balance',
-            value: formatINR(user.eTokens),
-            icon: Icons.account_balance_wallet_rounded,
-            delay: 0,
-          ),
+        AnimatedStatCard(
+          label: 'Available Cash Balance',
+          value: formatINR(user.eTokens),
+          icon: Icons.account_balance_wallet_rounded,
+          iconColor: AppTheme.amber,
+          delay: 0,
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: AnimatedStatCard(
-            label: 'Holdings',
-            value: '${user.portfolio.length}',
-            icon: Icons.pie_chart_rounded,
-            delay: 100,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: AnimatedStatCard(
-            label: 'Options',
-            value: '${user.options.length}',
-            icon: Icons.candlestick_chart_rounded,
-            delay: 200,
-          ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: AnimatedStatCard(
+                label: 'Holdings',
+                value: '${user.portfolio.length} Stocks',
+                icon: Icons.pie_chart_rounded,
+                iconColor: AppTheme.blue,
+                delay: 100,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: AnimatedStatCard(
+                label: 'Options Trades',
+                value: '${user.options.length} Active',
+                icon: Icons.candlestick_chart_rounded,
+                iconColor: AppTheme.violet,
+                delay: 200,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -304,20 +344,26 @@ class _ProfileScreenState extends State<ProfileScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.1),
+            gradient: AppTheme.amberGradient,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: AppTheme.primary.withValues(alpha: 0.25), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.amber.withValues(alpha: AppTheme.isDark ? 0.30 : 0.15),
+                blurRadius: 16,
+                spreadRadius: -2,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add_card_rounded, color: AppTheme.primary, size: 20),
+              Icon(Icons.add_card_rounded, color: Colors.white, size: 20),
               SizedBox(width: 10),
               Text(
                 'REQUEST E-TOKEN RECHARGE',
                 style: TextStyle(
-                  color: AppTheme.primary,
+                  color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
                   letterSpacing: 0.8,
@@ -330,94 +376,27 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Widget _buildEditForm(AuthProvider auth) {
-    return GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Edit Information',
-            style: TextStyle(
-              color: AppTheme.onSurface,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
-          const SizedBox(height: 20),
-          _buildTextField(_nameController, 'Full Name', Icons.person_outline),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-              onPressed: auth.isLoading
-                  ? null
-                  : () async {
-                      try {
-                        await auth.updateProfile(
-                          name: _nameController.text,
-                        );
-                        setState(() => _isEditing = false);
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Profile Updated!'),
-                              backgroundColor: AppTheme.primary),
-                        );
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(e.toString()),
-                            backgroundColor: AppTheme.secondary));
-                      }
-                    },
-              child: auth.isLoading
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.black))
-                  : const Text('SAVE CHANGES',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, letterSpacing: 1)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTextField(
-      TextEditingController controller, String label, IconData icon) {
-    return TextField(
-      controller: controller,
-      style: TextStyle(color: AppTheme.onSurface),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: AppTheme.onSurfaceVariant),
-        prefixIcon: Icon(icon, color: AppTheme.primary, size: 20),
-        filled: true,
-        fillColor: AppTheme.isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppTheme.borderColor),
+  Future<void> _saveInlineName() async {
+    final auth = context.read<AuthProvider>();
+    if (_nameController.text.trim().isEmpty) return;
+    try {
+      await auth.updateProfile(name: _nameController.text.trim());
+      setState(() => _isEditing = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile Updated!'),
+          backgroundColor: AppTheme.primary,
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppTheme.borderColor),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: AppTheme.secondary,
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide:
-              BorderSide(color: AppTheme.primary.withValues(alpha: 0.5)),
-        ),
-      ),
-    );
+      );
+    }
   }
   
   void logOut(AuthProvider auth) {

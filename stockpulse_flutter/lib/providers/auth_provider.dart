@@ -22,7 +22,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _user != null;
 
-  String get _baseUrl {
+  String get baseUrl {
     if (!kDebugMode) {
       return dotenv.get('LIVE_API_BASE_URL', fallback: 'https://stokpulse.vercel.app');
     }
@@ -104,7 +104,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/send-otp'),
+        Uri.parse('$baseUrl/api/auth/send-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email.trim()}),
       );
@@ -136,7 +136,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/verify-otp'),
+        Uri.parse('$baseUrl/api/auth/verify-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'name': name,

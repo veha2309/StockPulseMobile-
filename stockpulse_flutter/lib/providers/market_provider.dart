@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:hive/hive.dart';
 
 class CandleData {
   final DateTime date;
@@ -63,14 +65,48 @@ class MarketProvider extends ChangeNotifier {
   List<CandleData> intradayChartData = [];
   bool isLoading = false;
   String currentSymbol = "NSE:NIFTY50";
+  Timer? _tickTimer;
+  Timer? _globalTickTimer;
+  String selectedSector = "";
+
+  void setSectorFilter(String sector) {
+    selectedSector = sector;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _tickTimer?.cancel();
+    _globalTickTimer?.cancel();
+    super.dispose();
+  }
 
   Map<String, double> stockPrices = {};
   Map<String, double> stockChanges = {};
 
   static const trendingStocks = [
-    "NSE:RELIANCE", "NSE:TCS", "NSE:HDFCBANK", "NSE:INFY", "NSE:ICICIBANK",
-    "NSE:HINDUNILVR", "NSE:SBIN", "NSE:BHARTIARTL", "NSE:ITC", "NSE:KOTAKBANK",
-    "NSE:LT", "NSE:AXISBANK", "NSE:ASIANPAINT", "NSE:MARUTI", "NSE:TITAN",
+    // Banking (12 stocks)
+    "NSE:HDFCBANK", "NSE:ICICIBANK", "NSE:SBIN", "NSE:KOTAKBANK", "NSE:AXISBANK",
+    "NSE:INDUSINDBK", "NSE:PNB", "NSE:BANKBARODA", "NSE:FEDERALBNK", "NSE:IDFCFIRSTB",
+    "NSE:CANBK", "NSE:BANDHANBNK",
+    // Info Tech (10 stocks)
+    "NSE:TCS", "NSE:INFY", "NSE:WIPRO", "NSE:HCLTECH", "NSE:TECHM", "NSE:LTIM",
+    "NSE:COFORGE", "NSE:MPHASIS", "NSE:PERSISTENT", "NSE:KPITTECH",
+    // Pharma (8 stocks)
+    "NSE:SUNPHARMA", "NSE:CIPLA", "NSE:DRREDDY", "NSE:APOLLOHOSP", "NSE:DIVISLAB",
+    "NSE:LUPIN", "NSE:AUROPHARMA", "NSE:BIOCON",
+    // Auto (9 stocks)
+    "NSE:TATAMOTORS", "NSE:MARUTI", "NSE:M&M", "NSE:BAJAJ-AUTO", "NSE:EICHERMOT",
+    "NSE:HEROMOTOCO", "NSE:TVSMOTOR", "NSE:BALKRISIND", "NSE:TIINDIA",
+    // FMCG (7 stocks)
+    "NSE:HINDUNILVR", "NSE:ITC", "NSE:NESTLEIND", "NSE:BRITANNIA", "NSE:TATACONSUM",
+    "NSE:COLPAL", "NSE:GODREJCP",
+    // Energy (6 stocks)
+    "NSE:RELIANCE", "NSE:ONGC", "NSE:NTPC", "NSE:POWERGRID", "NSE:COALINDIA", "NSE:BPCL",
+    // Infra (5 stocks)
+    "NSE:LT", "NSE:ADANIENT", "NSE:ADANIPORTS", "NSE:ULTRACEMCO", "NSE:GRASIM",
+    // Telecom (4 stocks)
+    "NSE:BHARTIARTL", "NSE:IDEA", "NSE:TATACOMM", "NSE:TEJASNET"
   ];
 
   double get dailyChangePercent {
@@ -89,26 +125,34 @@ class MarketProvider extends ChangeNotifier {
   ];
 
   Future<void> toggleFavorite(String symbol) async {
-    if (watchlist.contains(symbol)) {
-      watchlist = watchlist.where((s) => s != symbol).toList();
-    } else {
-      watchlist = [...watchlist, symbol];
-    }
-    notifyListeners();
     try {
-      await _supabase.from('app_config').upsert({
-        'key': 'global_favorites',
-        'value': watchlist,
-      });
+      final box = Hive.box('settings');
+      final added = List<String>.from(box.get('user_added_favorites', defaultValue: <String>[]));
+      final removed = List<String>.from(box.get('user_removed_favorites', defaultValue: <String>[]));
+
+      if (watchlist.contains(symbol)) {
+        added.remove(symbol);
+        if (!removed.contains(symbol)) {
+          removed.add(symbol);
+        }
+      } else {
+        removed.remove(symbol);
+        if (!added.contains(symbol)) {
+          added.add(symbol);
+        }
+      }
+
+      await box.put('user_added_favorites', added);
+      await box.put('user_removed_favorites', removed);
+
+      await _syncWatchlist();
     } catch (e) {
-      debugPrint("STP ERROR: Failed to persist favorites: $e");
+      debugPrint("STP ERROR: Failed to toggle favorite: $e");
     }
     fetchAllQuotes();
   }
 
   MarketProvider() {
-    // It's safer to check if Supabase is initialized before using it.
-    // The actual initialization should be awaited in main.dart
     if (Supabase.instance.client.auth.currentUser != null) {
       _isWatchlistInitialized = true;
       _init();
@@ -116,6 +160,7 @@ class MarketProvider extends ChangeNotifier {
   }
 
   bool _isWatchlistInitialized = false;
+  List<Map<String, dynamic>> learningCards = [];
 
   Future<void> initializeWatchlist() async {
     if (_isWatchlistInitialized) {
@@ -126,39 +171,93 @@ class MarketProvider extends ChangeNotifier {
     await _init();
   }
 
-  Future<void> _init() async {
-    debugPrint("STP: MarketProvider initializing watchlist...");
+  Future<void> _syncWatchlist() async {
     try {
-      final res = await _supabase
+      final box = Hive.box('settings');
+      final added = List<String>.from(box.get('user_added_favorites', defaultValue: <String>[]));
+      final removed = List<String>.from(box.get('user_removed_favorites', defaultValue: <String>[]));
+
+      final favRes = await _supabase
           .from('app_config')
           .select('value')
           .eq('key', 'global_favorites')
           .maybeSingle();
 
-      if (res != null && res['value'] != null) {
-        final dynamic value = res['value'];
-        debugPrint("STP: Global favorites raw value: $value");
-
-        List<String> fetchedWatchlist = [];
+      List<String> dbFavorites = [];
+      if (favRes != null && favRes['value'] != null) {
+        final dynamic value = favRes['value'];
         if (value is List) {
-          fetchedWatchlist = value.map((e) => e.toString()).toList();
+          dbFavorites = value.map((e) => e.toString()).toList();
         } else if (value is String) {
           final decoded = jsonDecode(value);
           if (decoded is List) {
-            fetchedWatchlist = decoded.map((e) => e.toString()).toList();
+            dbFavorites = decoded.map((e) => e.toString()).toList();
           }
         }
-
-        if (fetchedWatchlist.isNotEmpty) {
-          watchlist = fetchedWatchlist;
-          debugPrint("STP: Watchlist updated with ${watchlist.length} items.");
-        }
-        notifyListeners();
       }
+
+      final merged = <String>{...dbFavorites, ...added};
+      merged.removeAll(removed);
+      watchlist = merged.toList();
+      notifyListeners();
     } catch (e) {
-      debugPrint("STP ERROR: Failed to load global favorites: $e");
+      debugPrint("STP ERROR: Failed to sync watchlist: $e");
+    }
+  }
+
+  Future<void> _init() async {
+    debugPrint("STP: MarketProvider initializing...");
+    try {
+      final responses = await Future.wait([
+        _supabase.from('app_config').select('value').eq('key', 'global_favorites').maybeSingle(),
+        _supabase.from('app_config').select('value').eq('key', 'global_learnings').maybeSingle(),
+      ]);
+
+      // 1. Process global_favorites
+      final favRes = responses[0];
+      List<String> dbFavorites = [];
+      if (favRes != null && favRes['value'] != null) {
+        final dynamic value = favRes['value'];
+        if (value is List) {
+          dbFavorites = value.map((e) => e.toString()).toList();
+        } else if (value is String) {
+          final decoded = jsonDecode(value);
+          if (decoded is List) {
+            dbFavorites = decoded.map((e) => e.toString()).toList();
+          }
+        }
+      }
+
+      final box = Hive.box('settings');
+      final added = List<String>.from(box.get('user_added_favorites', defaultValue: <String>[]));
+      final removed = List<String>.from(box.get('user_removed_favorites', defaultValue: <String>[]));
+
+      final merged = <String>{...dbFavorites, ...added};
+      merged.removeAll(removed);
+      watchlist = merged.toList();
+
+      // 2. Process global_learnings
+      final learnRes = responses[1];
+      if (learnRes != null && learnRes['value'] != null) {
+        final dynamic value = learnRes['value'];
+        List<Map<String, dynamic>> fetchedLearnings = [];
+        if (value is List) {
+          fetchedLearnings = value.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else if (value is String) {
+          final decoded = jsonDecode(value);
+          if (decoded is List) {
+            fetchedLearnings = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          }
+        }
+        if (fetchedLearnings.isNotEmpty) {
+          learningCards = fetchedLearnings;
+          debugPrint("STP: Loaded ${learningCards.length} learnings from db config.");
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint("STP ERROR: Failed to load config data: $e");
     } finally {
-      debugPrint("STP: Final watchlist: $watchlist");
       fetchAllQuotes();
     }
   }
@@ -167,6 +266,11 @@ class MarketProvider extends ChangeNotifier {
     final allSymbols = <String>{
       ...watchlist,
       ...trendingStocks,
+      "NSE:NIFTY50",
+      "BSE:SENSEX",
+      "NSE:NIFTY_BANK",
+      "NSE:NIFTY_IT",
+      "NSE:NIFTY_MIDCAP_50",
     }.toList();
 
     if (allSymbols.isEmpty) return;
@@ -208,6 +312,7 @@ class MarketProvider extends ChangeNotifier {
       });
 
       await Future.wait(futures);
+      _startGlobalTicking();
       notifyListeners();
     } catch (e) {
       debugPrint("STP ERROR: Failed to fetch all parallel quotes: $e");
@@ -278,6 +383,7 @@ class MarketProvider extends ChangeNotifier {
           final timestamps = result[0]['timestamp'] as List<dynamic>;
           underlyingPrice = (result[0]['meta']['regularMarketPrice'] ?? 0)
               .toDouble();
+          stockPrices[symbol] = underlyingPrice;
 
           chartData = _parseCandles(timestamps, quote);
         }
@@ -295,6 +401,7 @@ class MarketProvider extends ChangeNotifier {
 
       if (underlyingPrice > 0) {
         _generateOptionsChain(symbol);
+        _startLiveTicks(symbol);
       }
     } catch (e) {
       debugPrint("Error fetching market data: $e");
@@ -304,6 +411,94 @@ class MarketProvider extends ChangeNotifier {
     }
   }
 
+  void _startGlobalTicking() {
+    _globalTickTimer?.cancel();
+    _globalTickTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+      if (stockPrices.isEmpty) return;
+      final random = Random();
+      bool changed = false;
+
+      for (var symbol in stockPrices.keys) {
+        final currentVal = stockPrices[symbol] ?? 0.0;
+        if (currentVal <= 0.0) continue;
+
+        final isIndex = symbol.contains("NIFTY") || symbol.contains("SENSEX");
+        final range = isIndex ? 0.04 : 0.12;
+        final offset = isIndex ? 0.015 : 0.05;
+
+        final changePct = (random.nextDouble() * range - offset) / 100;
+        final newPrice = double.parse((currentVal * (1 + changePct)).toStringAsFixed(2));
+
+        stockPrices[symbol] = newPrice;
+
+        final currentChange = stockChanges[symbol] ?? 0.0;
+        stockChanges[symbol] = double.parse((currentChange + changePct * 100).toStringAsFixed(2));
+        changed = true;
+
+        if (symbol == currentSymbol) {
+          underlyingPrice = newPrice;
+        }
+      }
+
+      if (changed) {
+        notifyListeners();
+      }
+    });
+  }
+
+  void _startLiveTicks(String symbol) {
+    _tickTimer?.cancel();
+    _tickTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+      if (currentSymbol != symbol || underlyingPrice <= 0) {
+        timer.cancel();
+        return;
+      }
+      
+      // Fluctuate price slightly (-0.05% to +0.07%)
+      final random = Random();
+      final changePct = (random.nextDouble() * 0.12 - 0.05) / 100;
+      underlyingPrice = double.parse((underlyingPrice * (1 + changePct)).toStringAsFixed(2));
+      stockPrices[symbol] = underlyingPrice;
+
+      // Update change percentage dynamically
+      final openPrice = intradayChartData.isNotEmpty
+          ? intradayChartData.first.open
+          : (chartData.isNotEmpty ? chartData.last.open : underlyingPrice);
+      if (openPrice > 0) {
+        final newChange = ((underlyingPrice - openPrice) / openPrice * 100);
+        stockChanges[symbol] = newChange;
+      }
+      
+      // Update the last candle in intradayChartData to show dynamic updates on charts
+      if (intradayChartData.isNotEmpty) {
+        final lastCandle = intradayChartData.last;
+        intradayChartData[intradayChartData.length - 1] = CandleData(
+          date: lastCandle.date,
+          open: lastCandle.open,
+          high: max(lastCandle.high, underlyingPrice),
+          low: min(lastCandle.low, underlyingPrice),
+          close: underlyingPrice,
+        );
+      }
+
+      // Also update the last candle in historical chartData
+      if (chartData.isNotEmpty) {
+        final lastCandle = chartData.last;
+        chartData[chartData.length - 1] = CandleData(
+          date: lastCandle.date,
+          open: lastCandle.open,
+          high: max(lastCandle.high, underlyingPrice),
+          low: min(lastCandle.low, underlyingPrice),
+          close: underlyingPrice,
+        );
+      }
+
+      // Re-generate options chain based on new price
+      _generateOptionsChain(symbol);
+      notifyListeners();
+    });
+  }
+
   List<CandleData> _parseCandles(List<dynamic> timestamps, dynamic quote) {
     List<CandleData> candles = [];
     for (int i = 0; i < timestamps.length; i++) {
@@ -311,9 +506,13 @@ class MarketProvider extends ChangeNotifier {
           quote['high'][i] != null &&
           quote['low'][i] != null &&
           quote['close'][i] != null) {
+        // Force conversion to Indian Standard Time (IST: UTC + 5:30)
+        final utcDateTime = DateTime.fromMillisecondsSinceEpoch(timestamps[i] * 1000, isUtc: true);
+        final istDateTime = utcDateTime.add(const Duration(hours: 5, minutes: 30));
+        
         candles.add(
           CandleData(
-            date: DateTime.fromMillisecondsSinceEpoch(timestamps[i] * 1000),
+            date: istDateTime,
             open: (quote['open'][i]).toDouble(),
             high: (quote['high'][i]).toDouble(),
             low: (quote['low'][i]).toDouble(),
@@ -326,6 +525,11 @@ class MarketProvider extends ChangeNotifier {
   }
 
   String _toYahooSymbol(String symbol) {
+    if (symbol == "NSE:NIFTY50") return "^NSEI";
+    if (symbol == "BSE:SENSEX") return "^BSESN";
+    if (symbol == "NSE:NIFTY_BANK") return "^NSEBANK";
+    if (symbol == "NSE:NIFTY_IT") return "^CNXIT";
+    if (symbol == "NSE:NIFTY_MIDCAP_50") return "^NSEMDCP50";
     if (symbol.startsWith("NSE:")) return "${symbol.substring(4)}.NS";
     if (symbol.startsWith("BSE:")) return "${symbol.substring(4)}.BO";
     return symbol;
